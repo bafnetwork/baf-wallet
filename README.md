@@ -16,7 +16,7 @@ This is a [JSON-RPC 2.0](https://www.jsonrpc.org/specification) server built usi
 At a high level, when a JSON-RPC 2.0 request from some user `U` to sign some transaction `T` comes in, the following happens:
 
 1. Hyper receives and parses the HTTP request
-2. Some middleware will check authentication headers and deny access if they are invalid. 
+2. Some middleware will check authentication headers and deny access if they are invalid.
 3. A new handler function is instantiated by hyper to handle that request
 4. Inside the handler function instance:
    1. The JSOHN-RPC params are parsed
