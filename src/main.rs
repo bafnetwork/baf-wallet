@@ -98,9 +98,16 @@ async fn handler<'a>(
             println!("method: {:#?}, id: {:#?}", rpc.method, rpc.id);
 
             match *&rpc.method {
-                Some("createBafAccount") => {}
-                Some("createNearAccount") => {}
-                Some("signTx") => {}
+                Some("createNearAccount") => {
+                    // TODO: create a near keypair, create near account
+                    // TODO: define a struct for a near account, derive Serialize and Deserialize
+                    // TODO: store in database
+                }
+                Some("signTx") => {
+                    // TODO: get keys out of database
+                    // TODO: sign tx
+                    // TODO: send signed tx back to user
+                }
                 None => {
                     return Ok(bad_request(None));
                 }
@@ -127,6 +134,7 @@ async fn handler<'a>(
                         .verify()
                     {
                         Ok(true) => {
+                            // TODO: use jsonwebtoken
                             // TODO: create a JWT containing record.id, a nonce (will need to import an RNG for this) and probably some other stuff
                             // TODO: return a response containing the JWT
                         }
@@ -195,6 +203,8 @@ struct JsonRPC {
 
 fn main() {
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+
+    let addr_ref = &addr;
 
     // start rocksdb, get a handle to it, and wrap it in an Arc so multiple threads can use it
     let path = std::env::var("ROCKSDB_STORAGE_PATH")
