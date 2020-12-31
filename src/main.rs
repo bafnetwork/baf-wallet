@@ -2,17 +2,18 @@ use http::StatusCode;
 use hyper::server::Server;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response};
-use rocksdb::{Options, DB};
+use rocksdb::DB;
 use secrecy::{Secret, SecretVec};
 use serde::{Deserialize, Serialize};
 use serde_json::value::Value;
+use sodiumoxide::crypto::pwhash::argon2id13;
 use std::error::Error;
+use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 use uuid::Uuid;
-use sodiumoxide::crypto::pwhash::argon2id13;
 /// RocksDB stores only 2 mappings:
 /// Email -> UserAccount
 /// NearAccountID -> PrivKey
@@ -20,6 +21,16 @@ use sodiumoxide::crypto::pwhash::argon2id13;
 struct KeyPair {
     priv_key: SecretVec<u8>,
     pub_key: Vec<u8>,
+}
+
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+struct JsonRPC {
+    jsonrpc: String,
+    method: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    params: Option<Value>,
+    id: i64, // for now, enforce ID to be a number
 }
 
 #[derive(Serialize, Deserialize)]
@@ -122,11 +133,13 @@ async fn handler<'a>(
 
             tokio::task::block_in_place(move || match db.get(args.email.as_bytes()) {
                 Ok(Some(record_bytes)) => {
-                    let record: Web2AuthRecord = match serde_json::from_slice(record_bytes.as_ref()) {
+                    let record: Web2AuthRecord = match serde_json::from_slice(record_bytes.as_ref())
+                    {
                         Ok(record) => record,
                         Err(e) => return Ok(internal_server_error(Some(e.into()))),
                     };
-                    if let Some(ref password_hash) = argon2id13::HashedPassword::from_slice(record) {
+                    if let Some(ref password_hash) = argon2id13::HashedPassword::from_slice(record)
+                    {
                         if argon2id13::pwhash_verify(password_hash, args.password.as_bytes()) {
 
                             // TODO: use jsonwebtoken
@@ -155,9 +168,9 @@ async fn handler<'a>(
 
             tokio::task::block_in_place(move || {
                 let password_hash = match argon2id13::pwhash(
-                    args.password.as_bytes(), 
-                    argon2id13::OPSLIMIT_INTERACTIVE, 
-                    argon2id13::MEMLIMIT_INTERACTIVE
+                    args.password.as_bytes(),
+                    argon2id13::OPSLIMIT_INTERACTIVE,
+                    argon2id13::MEMLIMIT_INTERACTIVE,
                 ) {
                     Ok(hashed) => hashed,
                     Err(e) => return Ok(internal_server_error(None)),
@@ -168,9 +181,7 @@ async fn handler<'a>(
                 };
                 let serialized_record = match serde_json::to_vec(&record) {
                     Ok(ser) => ser,
-                    Err(e) => {
-                        return Ok(internal_server_error(Some(e.into())))
-                    }
+                    Err(e) => return Ok(internal_server_error(Some(e.into()))),
                 };
                 match db.put(args.email.as_bytes(), serialized_record.as_ref()) {
                     Ok(res) => {
@@ -188,17 +199,7 @@ async fn handler<'a>(
     }
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-struct JsonRPC {
-    jsonrpc: String,
-    method: String,
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    params: Option<Value>,
-    id: i64, // for now, enforce ID to be a number
-}
-
-fn main() {
+fn wrapped_main(destroy_db_at_end: bool) {
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
 
     let addr_ref = &addr;
@@ -243,5 +244,12 @@ fn main() {
         });
     }
 
-    // DB will automatically be closed when it gets dropped
+    // DB will automatically be closed when it gets dropped. We can also optionally destroy it (i.e, wipe the data).
+    if destroy_db_at_end {
+        let _ = DB::destroy(&rocksdb::options::default(), path);
+    }
+}
+
+fn main() {
+    wrapped_main(false)
 }
