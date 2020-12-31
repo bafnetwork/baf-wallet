@@ -7,10 +7,13 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-hyper = { version = "0.14.1", features = ["full"]}
+hyper = { version = "0.14.2", features = ["full"]}
 http = { version = "0.2.2" }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 rocksdb = { version = "0.15" }
 secrecy = { version = "0.7.0" }
+rust-argon2 = { version = "0.8.3" }
+argonautica = { version = "0.2.0", features = ["simd"] }
+uuid = { version = "0.8.1" }
