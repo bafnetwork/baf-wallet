@@ -1,4 +1,3 @@
-use argonautica::{Hasher, Verifier};
 use http::StatusCode;
 use hyper::server::Server;
 use hyper::service::{make_service_fn, service_fn};
@@ -13,6 +12,7 @@ use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 use uuid::Uuid;
+use sodiumoxide::crypto::pwhash::argon2id13;
 /// RocksDB stores only 2 mappings:
 /// Email -> UserAccount
 /// NearAccountID -> PrivKey
@@ -24,8 +24,8 @@ struct KeyPair {
 
 #[derive(Serialize, Deserialize)]
 struct Web2AuthRecord<'a> {
-    password_hash: &'a str,
-    id: u128,
+    password_hash: &'a [u8],
+    id: Uuid,
 }
 
 struct Account<'a> {
@@ -45,16 +45,16 @@ struct LoginArgs<'a> {
     password: &'a str,
 }
 
-fn get_jwt_secret<'a>() -> Secret<&'a [u8]> {
+fn get_jwt_secret<'a>() -> Secret<String> {
     match std::env::var("JWT_SECRET") {
-        Ok(secret) => Secret::new(secret.as_bytes()),
+        Ok(secret) => Secret::new(secret),
         Err(_) => panic!("JWT_SECRET environment variable not set!"),
     }
 }
 
-fn get_hasher_secret<'a>() -> Secret<&'a [u8]> {
+fn get_hasher_secret<'a>() -> Secret<String> {
     match std::env::var("HASHER_SECRET") {
-        Ok(secret) => Secret::new(secret.as_bytes()),
+        Ok(secret) => Secret::new(secret),
         Err(_) => panic!("HASHER_SECRET environment variable not set!"),
     }
 }
@@ -82,8 +82,8 @@ fn internal_server_error(e: Option<Box<dyn Error>>) -> Response<Body> {
 async fn handler<'a>(
     req: Request<Body>,
     db: Arc<DB>,
-    hasher_secret: Secret<&'a [u8]>,
-    jwt_secret: Secret<&'a [u8]>,
+    hasher_secret: Secret<String>,
+    jwt_secret: Secret<String>,
 ) -> Result<Response<Body>, hyper::Error> {
     match (req.method(), req.uri().path()) {
         (&Method::POST, "/rpc") => {
@@ -98,23 +98,23 @@ async fn handler<'a>(
             println!("method: {:#?}, id: {:#?}", rpc.method, rpc.id);
 
             match *&rpc.method {
-                Some("createNearAccount") => {
+                "createNearAccount" => {
                     // TODO: create a near keypair, create near account
                     // TODO: define a struct for a near account, derive Serialize and Deserialize
                     // TODO: store in database
                 }
-                Some("signTx") => {
+                "signTx" => {
                     // TODO: get keys out of database
                     // TODO: sign tx
                     // TODO: send signed tx back to user
                 }
-                None => {
+                _ => {
                     return Ok(bad_request(None));
                 }
             }
         }
         (&Method::POST, "/login") => {
-            let body = hyper::Body::to_bytes(req.into_body()).await?;
+            let body = hyper::body::to_bytes(req.into_body()).await?;
             let args: LoginArgs = match serde_json::from_slice(body.as_ref()) {
                 Ok(args) => args,
                 Err(e) => return Ok(bad_request(Some(e.into()))),
@@ -122,29 +122,21 @@ async fn handler<'a>(
 
             tokio::task::block_in_place(move || match db.get(args.email.as_bytes()) {
                 Ok(Some(record_bytes)) => {
-                    let mut verifier = Verifier::default();
-                    let record: Web2AuthRecord = match serde_json::from_slice(record_bytes) {
+                    let record: Web2AuthRecord = match serde_json::from_slice(record_bytes.as_ref()) {
                         Ok(record) => record,
                         Err(e) => return Ok(internal_server_error(Some(e.into()))),
                     };
-                    match verifier
-                        .with_hash(record.password_hash)
-                        .with_password(args.password)
-                        .with_secret_key(hasher_secret.reveal_secret())
-                        .verify()
-                    {
-                        Ok(true) => {
+                    if let Some(ref password_hash) = argon2id13::HashedPassword::from_slice(record) {
+                        if argon2id13::pwhash_verify(password_hash, args.password.as_bytes()) {
+
                             // TODO: use jsonwebtoken
                             // TODO: create a JWT containing record.id, a nonce (will need to import an RNG for this) and probably some other stuff
                             // TODO: return a response containing the JWT
-                        }
-                        Ok(false) => {
+                        } else {
                             // TODO: return response with 404 not found
                         }
-                        Err(e) => {
-                            // TODO: print the error and return response with 505 internal server error
-                        }
                     }
+                    // TODO: return response with 404 not found
                 }
                 Ok(None) => {
                     // TODO return response with 404 not found
@@ -162,20 +154,25 @@ async fn handler<'a>(
             };
 
             tokio::task::block_in_place(move || {
-                let mut hasher = Hasher::default();
-                let password_hash = match hasher
-                    .with_password(args.password)
-                    .with_secret_key(hasher_secret.reveal_secret())
-                    .hash()
-                {
+                let password_hash = match argon2id13::pwhash(
+                    args.password.as_bytes(), 
+                    argon2id13::OPSLIMIT_INTERACTIVE, 
+                    argon2id13::MEMLIMIT_INTERACTIVE
+                ) {
                     Ok(hashed) => hashed,
-                    Err(e) => return Ok(internal_server_error(Some(e.into()))),
+                    Err(e) => return Ok(internal_server_error(None)),
                 };
                 let record = Web2AuthRecord {
-                    password_hash: password_hash,
-                    id: Uuid::new_v4().as_u128(),
+                    password_hash: password_hash.as_ref(),
+                    id: Uuid::new_v4(),
                 };
-                match db.put(args.email.as_bytes(), serde_json::to_vec(record).as_ref()) {
+                let serialized_record = match serde_json::to_vec(&record) {
+                    Ok(ser) => ser,
+                    Err(e) => {
+                        return Ok(internal_server_error(Some(e.into())))
+                    }
+                };
+                match db.put(args.email.as_bytes(), serialized_record.as_ref()) {
                     Ok(res) => {
                         let mut res = Response::new(Body::from("Created"));
                         *res.status_mut() = StatusCode::CREATED;
@@ -211,6 +208,8 @@ fn main() {
         .expect("ROCKSDB_STORAGE_PATH environment variable not set!");
 
     let db = Arc::new(DB::open_default(path).unwrap());
+
+    sodiumoxide::init().expect("failed to initialize libsodium!");
 
     // start the tokio runtime, start hyper inside it, and then block until the server dies
     {
