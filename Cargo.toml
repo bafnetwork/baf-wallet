@@ -15,5 +15,5 @@ serde_json = { version = "1.0" }
 rocksdb = { version = "0.15" }
 secrecy = { version = "0.7.0" }
 rust-argon2 = { version = "0.8.3" }
-argonautica = { version = "0.2.0", features = ["simd"] }
-uuid = { version = "0.8.1" }
+sodiumoxide = { version = "0.2.6" }
+uuid = { version = "0.8.1", features = ["serde", "v4"] }
