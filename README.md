@@ -25,3 +25,7 @@ At a high level, when a JSON-RPC 2.0 request from some user `U` to sign some tra
 5. Once the handler returns, Hyper does the rest
 
 ![diagram](diagram.png)
+
+## Notes
+
+* `sodiumoxide` depends on `libsodium`, which is written in C, so you may run into compilation trouble. If you do, I reccomend installing `pkg-config` and `libsodium` separately using using your prefered package manager (e.g. `apt install pkg-config libsodium` on WSL/Ubuntu, `brew install pkg-config libsodium` on MacOSr). Then set the env variable `SODIUM_USE_PKG_CONFIG=1` as documented [here]([your prefered package manage](https://github.com/sodiumoxide/sodiumoxide#extended-usage)) to make `sodiumoxide` use the libsodium installed in the previous step.
