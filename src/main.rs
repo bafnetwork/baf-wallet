@@ -12,7 +12,6 @@ use tokio::runtime::Runtime;
 use uuid::Uuid;
 
 mod keystore;
-mod sign_tx;
 mod util;
 mod web2;
 
