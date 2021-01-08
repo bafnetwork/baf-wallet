@@ -1,13 +1,16 @@
 use crate::util::{bad_request, internal_server_error, not_found};
 use crate::JsonRPC;
 use hyper::{Body, Response};
+use hyper::{Client, Method, Request, Uri};
 use rocksdb::DB;
 use serde::{Deserialize, Serialize};
+use serde_json::map::Map;
 use serde_json::value::Value;
 use sodiumoxide::crypto::aead::chacha20poly1305_ietf;
 use sodiumoxide::crypto::sign::ed25519;
 use sodiumoxide::randombytes::randombytes;
 use std::convert::TryFrom;
+use std::convert::Into;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -18,7 +21,7 @@ struct NearKeyRecord<'a> {
 }
 
 struct CreateNearAccountArgs<'a> {
-    accountId: &'a str,
+    account_id: &'a str,
 }
 
 impl<'a> TryFrom<Value> for CreateNearAccountArgs<'a> {
@@ -27,15 +30,46 @@ impl<'a> TryFrom<Value> for CreateNearAccountArgs<'a> {
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
             Value::Object(obj) => {
-                if let Some(Value::String(ref accountId)) = obj.get("accountId") {
+                if let Some(Value::String(ref account_id)) = obj.get("account_id") {
                     Ok(CreateNearAccountArgs {
-                        accountId: accountId,
+                        account_id: account_id,
                     })
                 } else {
                     Err("invalid JSON-RPC params for CreateNearAccount")
                 }
             }
             _ => Err("invalid JSON-RPC params for CreateNearAccount"),
+        }
+    }
+}
+
+struct ViewAccountArgs<'a> {
+    request_type: &'a str,
+    finality: &'a str,
+    account_id: &'a str,
+}
+
+impl<'a> Into<JsonRPC> for ViewAccountArgs<'a> {
+    fn into(self) -> JsonRPC {
+        let mut map = Map::new();
+        map.insert("request_type", self.request_type);
+        map.insert("finality", self.finality);
+        map.insert("account_id", self.account_id);
+        JsonRPC {
+            jsonrpc: "2.0",
+            method: "query",
+            params: Some(Value::Object(map)),
+            id: "dontcare",
+        }
+    }
+}
+
+impl<'a> From<&'a str> for ViewAccountArgs<'a> {
+    fn from(account_id: &'a str) -> ViewAccountArgs<'a> {
+        ViewAccountArgs {
+            request_type: "query",
+            finality: "optimistic"
+            account_id: account_id,
         }
     }
 }
@@ -57,6 +91,39 @@ pub async fn create_near_account(
             )))
         }
     };
+
+    let view_account_args = ViewAccountArgs::from(args.account_id);
+    match serde_json::to_vec(&view_account_args) {
+        Ok(view_account_bytes) => {
+            // TODO: put uri into env variable
+            let req = match Request::builder()
+                .method(Method::POST)
+                .uri("https://rpc.testnet.near.org")
+                .header("content-type", "application/json")
+                .body(Body::from(view_account_bytes)) {
+                    Ok(req) => req,
+                    Err(e) => return Ok(internal_server_error(Some(e.into())))
+                };
+            let client = Client::new();
+            let res = client.request(req).await {
+                Ok(res) => {
+                    if res.status == StatusCode::OK {
+                        res
+                    } else {
+                        return Ok(internal_server_error("response to ViewAccount not Ok!".into())),
+                    }
+                }
+                Err(e) => return Ok(internal_server_error(Some(e.into())))
+            }
+            let res_body = match hyper::body::to_bytes(req.into_body()).await {
+                Ok(res_body) => res_body,
+                Err(e) => return Ok(internal_server_error(Some(e.into())))
+            }
+            // TODO deserialize RPC response, check to make sure account exists
+            unimplemented!()
+        }
+        Err(e) => return Ok(internal_server_error(Some(e.into)))
+    }
     // TODO: check if NEAR accountID exists
     let (_pk, mut sk) = ed25519::gen_keypair();
 
@@ -69,7 +136,7 @@ pub async fn create_near_account(
         };
         let enc = chacha20poly1305_ietf::seal(
             sk.as_ref(),
-            Some(args.accountId.as_bytes()),
+            Some(args.account_id.as_bytes()),
             &nonce,
             &encryption_key,
         );
@@ -85,7 +152,7 @@ pub async fn create_near_account(
             }
         };
 
-        match db.put(args.accountId, record_bytes.as_ref()) {
+        match db.put(args.account_id, record_bytes.as_ref()) {
             Ok(_) => {
                 // TODO: make and sign transaction to create account, return Some(tx)
                 unimplemented!()
