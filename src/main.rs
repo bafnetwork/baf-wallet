@@ -24,7 +24,7 @@ struct JsonRPC {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     params: Option<Value>,
-    id: i64, // for now, enforce ID to be a number
+    id: String,
 }
 
 fn get_jwt_secret() -> SecretVec<u8> {
