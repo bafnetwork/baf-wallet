@@ -1,30 +1,63 @@
 use http::StatusCode;
 use hyper::{Body, Response};
-use std::error::Error;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-pub fn bad_request(e: Option<Box<dyn Error>>) -> Response<Body> {
-    if let Some(e) = e {
-        eprintln!("{}", e);
-    }
+// HTTP Response helpers
+
+pub fn bad_request() -> Response<Body> {
     let mut res = Response::new(Body::from("Bad Request"));
     *res.status_mut() = StatusCode::BAD_REQUEST;
     res
 }
 
-pub fn internal_server_error(e: Option<Box<dyn Error>>) -> Response<Body> {
-    if let Some(e) = e {
-        eprintln!("{}", e);
-    }
+pub fn internal_server_error() -> Response<Body> {
     let mut res = Response::new(Body::from("Internal Server Error"));
     *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
     res
 }
 
-pub fn not_found(e: Option<Box<dyn Error>>) -> Response<Body> {
-    if let Some(e) = e {
-        eprintln!("{}", e);
-    }
+pub fn not_found() -> Response<Body> {
     let mut res = Response::new(Body::from("Not Found"));
     *res.status_mut() = StatusCode::NOT_FOUND;
     res
+}
+
+pub fn ok() -> Response<Body> {
+    let mut res = Response::new(Body::from("Ok"));
+    *res.status_mut() = StatusCode::OK;
+    res
+}
+
+// Json RPC structs
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JsonRpc {
+    pub jsonrpc: String,
+    pub method: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<Value>,
+    pub id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JsonRpcOk {
+    pub jsonrpc: String,
+    pub result: Value,
+    pub id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JsonRpcErr {
+    pub jsonrpc: String,
+    pub error: Value,
+    pub id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum JsonRpcResult {
+    Ok(JsonRpcOk),
+    Err(JsonRpcErr),
+    // TODO: add notification type
 }
