@@ -1,16 +1,19 @@
-use crate::util::{bad_request, internal_server_error, not_found};
-use crate::JsonRPC;
+use crate::error::UserFacingError;
+use crate::near::{
+    send_transaction_bytes, sign_and_serialize_transaction, view_account, Action,
+    CreateAccountAction, ViewAccountArgs,
+};
+use crate::util::{JsonRpc, JsonRpcResult};
+use anyhow::anyhow;
+use http::StatusCode;
 use hyper::{Body, Response};
-use hyper::{Client, Method, Request, Uri};
 use rocksdb::DB;
 use serde::{Deserialize, Serialize};
-use serde_json::map::Map;
 use serde_json::value::Value;
 use sodiumoxide::crypto::aead::chacha20poly1305_ietf;
 use sodiumoxide::crypto::sign::ed25519;
 use sodiumoxide::randombytes::randombytes;
 use std::convert::TryFrom;
-use std::convert::Into;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -43,143 +46,96 @@ impl<'a> TryFrom<Value> for CreateNearAccountArgs<'a> {
     }
 }
 
-struct ViewAccountArgs<'a> {
-    request_type: &'a str,
-    finality: &'a str,
-    account_id: &'a str,
-}
-
-impl<'a> Into<JsonRPC> for ViewAccountArgs<'a> {
-    fn into(self) -> JsonRPC {
-        let mut map = Map::new();
-        map.insert("request_type", self.request_type);
-        map.insert("finality", self.finality);
-        map.insert("account_id", self.account_id);
-        JsonRPC {
-            jsonrpc: "2.0",
-            method: "query",
-            params: Some(Value::Object(map)),
-            id: "dontcare",
-        }
-    }
-}
-
-impl<'a> From<&'a str> for ViewAccountArgs<'a> {
-    fn from(account_id: &'a str) -> ViewAccountArgs<'a> {
-        ViewAccountArgs {
-            request_type: "query",
-            finality: "optimistic"
-            account_id: account_id,
-        }
-    }
-}
-
 pub async fn create_near_account(
-    rpc: JsonRPC,
+    rpc: JsonRpc,
     user_id: Uuid,
     db: Arc<DB>,
     encryption_key: chacha20poly1305_ietf::Key,
-) -> Result<Response<Body>, hyper::Error> {
-    let args = match rpc.params {
-        Some(params) => match CreateNearAccountArgs::try_from(params) {
-            Ok(args) => args,
-            Err(e) => return Ok(bad_request(Some(e.into()))),
-        },
-        None => {
-            return Ok(bad_request(Some(
-                "rpc to create_near_account has no params!".into(),
-            )))
-        }
+) -> Result<Response<Body>, UserFacingError> {
+    let params = rpc.params.ok_or(UserFacingError::BadRequest(anyhow!(
+        "rpc to create_near_account has no params!"
+    )))?;
+    let args = CreateNearAccountArgs::try_from(params)
+        .map_err(|e| UserFacingError::BadRequest(anyhow!(e)))?;
+
+    // check if the requested NEAR accountId exists
+    let view_account_args = ViewAccountArgs::from(args.account_id);
+    let view_account_res = view_account(view_account_args)
+        .await
+        .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?;
+    if let JsonRpcResult::Err(_e) = view_account_res {
+        // TODO: actually check what the error is
+        return Err(UserFacingError::NearAccountExists);
     };
 
-    let view_account_args = ViewAccountArgs::from(args.account_id);
-    match serde_json::to_vec(&view_account_args) {
-        Ok(view_account_bytes) => {
-            // TODO: put uri into env variable
-            let req = match Request::builder()
-                .method(Method::POST)
-                .uri("https://rpc.testnet.near.org")
-                .header("content-type", "application/json")
-                .body(Body::from(view_account_bytes)) {
-                    Ok(req) => req,
-                    Err(e) => return Ok(internal_server_error(Some(e.into())))
-                };
-            let client = Client::new();
-            let res = client.request(req).await {
-                Ok(res) => {
-                    if res.status == StatusCode::OK {
-                        res
-                    } else {
-                        return Ok(internal_server_error("response to ViewAccount not Ok!".into())),
-                    }
-                }
-                Err(e) => return Ok(internal_server_error(Some(e.into())))
-            }
-            let res_body = match hyper::body::to_bytes(req.into_body()).await {
-                Ok(res_body) => res_body,
-                Err(e) => return Ok(internal_server_error(Some(e.into())))
-            }
-            // TODO deserialize RPC response, check to make sure account exists
-            unimplemented!()
-        }
-        Err(e) => return Ok(internal_server_error(Some(e.into)))
-    }
-    // TODO: check if NEAR accountID exists
-    let (_pk, mut sk) = ed25519::gen_keypair();
+    // create account
 
-    let tx = tokio::task::block_in_place(move || {
-        let nonce = match chacha20poly1305_ietf::Nonce::from_slice(
+    let tx_bytes = tokio::task::block_in_place(move || {
+        let (pk, mut sk) = ed25519::gen_keypair();
+
+        let nonce = chacha20poly1305_ietf::Nonce::from_slice(
             randombytes(chacha20poly1305_ietf::NONCEBYTES).as_ref(),
-        ) {
-            Some(nonce) => nonce,
-            None => return None,
-        };
+        )
+        .ok_or(UserFacingError::InternalServerError(anyhow!(
+            "failed to generate nonce for record encryption"
+        )))?;
         let enc = chacha20poly1305_ietf::seal(
             sk.as_ref(),
             Some(args.account_id.as_bytes()),
             &nonce,
             &encryption_key,
         );
+
         let record = NearKeyRecord {
             nonce: nonce,
             encrypted_key: enc.as_slice(),
         };
-        let record_bytes = match serde_json::to_vec(&record) {
-            Ok(record_bytes) => record_bytes,
-            Err(e) => {
-                eprintln!("failed to deserialize key: {}", e);
-                return None;
-            }
-        };
+        let record_bytes = serde_json::to_vec(&record).map_err(|e| {
+            UserFacingError::InternalServerError(anyhow!(format!("failed to serialize key: {}", e)))
+        })?;
 
-        match db.put(args.account_id, record_bytes.as_ref()) {
-            Ok(_) => {
-                // TODO: make and sign transaction to create account, return Some(tx)
-                unimplemented!()
-            }
-            Err(e) => {
-                eprintln!("failed to PUT new key into database: {}", e);
-                None
-            }
+        db.put(args.account_id, record_bytes).map_err(|e| {
+            UserFacingError::InternalServerError(anyhow!(format!(
+                "failed to PUT new key into database: {}",
+                e
+            )))
+        })?;
+        Ok(sign_and_serialize_transaction(
+            vec![Action::CreateAccount(CreateAccountAction {})],
+            &pk,
+            &sk,
+            signer_id, // TODO: figure out what this should be
+            args.account_id,
+        ))
+    })?; // FIXME: <- make it easy to see that this is a Result
+
+    match send_transaction_bytes(tx_bytes)
+        .await
+        .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?
+    {
+        JsonRpcResult::Ok(_response) => {
+            // TODO there are probably other checks that need to happen here
+            let mut res = Response::new(Body::from("created"));
+            *res.status_mut() = StatusCode::CREATED;
+            Ok(res)
         }
-    });
-    match tx {
-        Some(tx) => {
-            // TODO: send tx, wait for response from NEAR blockchain, return response to client accordingly
-            unimplemented!()
+        // TODO handle this properly
+        JsonRpcResult::Err(response) => {
+            // TODO read the error
+            Err(UserFacingError::InternalServerError(anyhow!(format!(
+                "failed to create account on NEAR blockchain: {}",
+                response.error
+            ))))
         }
-        None => Ok(internal_server_error(Some(
-            "failed to create account on NEAR blockchain".into(),
-        ))),
     }
 }
 
-pub async fn sign_tx(
-    rpc: JsonRPC,
+pub async fn sign_transaction(
+    rpc: JsonRpc,
     user_id: Uuid,
     db: Arc<DB>,
     encryption_key: chacha20poly1305_ietf::Key,
-) -> Result<Response<Body>, hyper::Error> {
+) -> Result<Response<Body>, UserFacingError> {
     // TODO: deserialize params, return bad request if it fails
     // TODO: get keys out of database
     // TODO: sign tx
