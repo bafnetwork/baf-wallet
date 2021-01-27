@@ -51,6 +51,7 @@ impl<'a> From<&'a str> for ViewAccountArgs<'a> {
         }
     }
 }
+
 pub async fn view_account<'a>(args: ViewAccountArgs<'a>) -> Result<JsonRpcResult, Error> {
     let view_account_bytes = serde_json::to_vec(&args).map_err(|e| anyhow!(e))?;
 
@@ -83,11 +84,12 @@ pub struct SignedTransaction<'a, 'b> {
 
 #[derive(Clone, Debug, Serialize, Deserialize, BorshSerialize)]
 pub struct Transaction<'a> {
-    signer_id: &'a str,
+    signer_id: String,
+    #[serde(borrow)]
     public_key: TxPubKey<'a>,
     nonce: u64,
-    receiver_id: &'a str,
-    block_hash: &'a [u8],
+    receiver_id: String,
+    block_hash: String,
     actions: Vec<Action>,
 }
 
@@ -104,24 +106,32 @@ pub enum Action {
 
 #[derive(Clone, Debug, Serialize, Deserialize, BorshSerialize)]
 pub struct CreateAccountAction;
-pub fn sign_and_serialize_transaction<'a, 'b>(
+
+/// Sign and serialize transaction
+/// signer_id and receiver_id are near account id's
+/// block_hash is a base-64 encoded string of the hash of the block atop which this transaction is
+/// supposed to go.
+pub fn sign_and_serialize_transaction(
     actions: Vec<Action>,
     pk: &ed25519::PublicKey,
     sk: &ed25519::SecretKey,
-    signer_id: &'a str,
-    receiver_id: &'b str,
+    signer_id: &str,
+    receiver_id: &str,
+    block_hash: &str,
 ) -> Bytes {
     let nonce_bytes = randombytes(8);
     let nonce: u64 = LittleEndian::read_u64(nonce_bytes.as_ref());
     let tx = Transaction {
-        signer_id: signer_id.as_ref(),
+        signer_id: signer_id.to_owned(),
         public_key: TxPubKey {
-            key_type: 0, // TODO look up what this should be
+            // 0 corresponds to ed25519
+            // see https://github.com/near/nearcore/blob/38d83a801b16ed3a9318716b077dc47d9ea8bc43/core/crypto/src/signature.rs#L20
+            key_type: 0,
             data: pk.as_ref(),
         },
         nonce: nonce,
-        receiver_id: receiver_id,
-        block_hash: 0, // TODO figure out what this should be
+        receiver_id: receiver_id.to_owned(),
+        block_hash: block_hash.to_owned(),
         actions: actions,
     };
     let borshed = tx
@@ -147,14 +157,96 @@ pub async fn send_transaction_bytes(tx_bytes: Bytes) -> Result<JsonRpcResult, Er
         .uri("https://rpc.testnet.near.org")
         .header("content-type", "application/json")
         .body(Body::from(tx_bytes))
-        .unwrap();
+        .map_err(|e| anyhow!(e))?;
     let client = Client::new();
-    // TODO handle this properly
     let res = client.request(req).await.map_err(|e| anyhow!(e))?;
-    // TODO handle this properly
     let body = hyper::body::to_bytes(res.into_body())
         .await
         .map_err(|e| anyhow!(e))?;
-    // TODO handle this properly
     Ok(serde_json::from_slice::<JsonRpcResult>(body.as_ref()).map_err(|e| anyhow!(e))?)
+}
+
+/// parameters for "block" RPC
+/// see https://docs.near.org/docs/api/rpc#block for more information
+#[derive(Serialize, Deserialize)]
+pub enum BlockArgs<'a> {
+    Finality(&'a str),
+    BlockId(u32),
+    BlockHash(&'a str),
+}
+
+impl<'a> Into<JsonRpc> for BlockArgs<'a> {
+    fn into(self) -> JsonRpc {
+        let mut map = Map::new();
+        match self {
+            Self::Finality(finality) => {
+                map.insert("finality".to_owned(), Value::String(finality.to_owned()));
+                JsonRpc {
+                    jsonrpc: "2.0".to_owned(),
+                    method: "block".to_owned(),
+                    params: Some(Value::Object(map)),
+                    id: "dontcare".to_owned(),
+                }
+            }
+            Self::BlockId(block_id) => {
+                map.insert("block_id".to_owned(), Value::Number(block_id.into()));
+                JsonRpc {
+                    jsonrpc: "2.0".to_owned(),
+                    method: "block".to_owned(),
+                    params: Some(Value::Object(map)),
+                    id: "dontcare".to_owned(),
+                }
+            }
+            Self::BlockHash(block_hash) => {
+                map.insert("block_id".to_owned(), Value::String(block_hash.to_owned()));
+                JsonRpc {
+                    jsonrpc: "2.0".to_owned(),
+                    method: "block".to_owned(),
+                    params: Some(Value::Object(map)),
+                    id: "dontcare".to_owned(),
+                }
+            }
+        }
+    }
+}
+
+pub async fn get_latest_block_hash() -> Result<String, Error> {
+    let rpc: JsonRpc = BlockArgs::Finality("final").into();
+    let rpc_bytes = serde_json::to_vec(&rpc).map_err(|e| anyhow!(e))?;
+
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("https:://rpc.testnet.near.org")
+        .header("content-type", "application/json")
+        .body(Body::from(rpc_bytes))
+        .map_err(|e| anyhow!(e))?;
+    let client = Client::new();
+
+    let res = client.request(req).await.map_err(|e| anyhow!(e))?;
+    let body = hyper::body::to_bytes(res.into_body())
+        .await
+        .map_err(|e| anyhow!(e))?;
+
+    // TODO: make this less fugly
+    match serde_json::from_slice::<JsonRpcResult>(body.as_ref()).map_err(|e| anyhow!(e))? {
+        JsonRpcResult::Ok(response) => match response.result {
+            Value::Object(obj) => match obj.get("header") {
+                Some(&Value::Object(ref obj)) => match obj.get("hash") {
+                    Some(&Value::String(ref hash)) => Ok(hash.to_owned()),
+                    _ => Err(anyhow!(
+                        "response to 'block' rpc does not have string field 'result.header.hash'"
+                    )),
+                },
+                _ => Err(anyhow!(
+                    "response to 'block' rpc does not have object field 'result.header'"
+                )),
+            },
+            _ => Err(anyhow!(
+                "response to 'block' rpc does not have object field 'result'"
+            )),
+        },
+        JsonRpcResult::Err(response) => Err(anyhow!(
+            serde_json::to_string_pretty(&response.error).map_err(|e| anyhow!(e))?
+        )),
+    }
 }

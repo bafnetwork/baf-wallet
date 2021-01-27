@@ -23,10 +23,6 @@ struct AuthPayload {
 struct Web2AuthRecord<'a> {
     password_hash: &'a [u8],
     id: Uuid,
-}
-
-struct Account<'a> {
-    email: &'a str,
     near_account_id: Option<String>,
 }
 
@@ -90,11 +86,12 @@ pub async fn handle_signup(
             argon2id13::OPSLIMIT_INTERACTIVE,
             argon2id13::MEMLIMIT_INTERACTIVE,
         )
-        .map_err(|e| UserFacingError::InternalServerError(anyhow!("failed to hash password")))?;
+        .map_err(|_| UserFacingError::InternalServerError(anyhow!("failed to hash password")))?;
 
         let record = Web2AuthRecord {
             password_hash: password_hash.as_ref(),
             id: Uuid::new_v4(),
+            near_account_id: None,
         };
         let serialized_record = serde_json::to_vec(&record)
             .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?;

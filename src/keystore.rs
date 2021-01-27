@@ -1,9 +1,10 @@
 use crate::error::UserFacingError;
 use crate::near::{
-    send_transaction_bytes, sign_and_serialize_transaction, view_account, Action,
-    CreateAccountAction, ViewAccountArgs,
+    get_latest_block_hash, send_transaction_bytes, sign_and_serialize_transaction, view_account,
+    Action, CreateAccountAction, ViewAccountArgs,
 };
 use crate::util::{JsonRpc, JsonRpcResult};
+use crate::wallet_account_id;
 use anyhow::anyhow;
 use http::StatusCode;
 use hyper::{Body, Response};
@@ -23,11 +24,11 @@ struct NearKeyRecord<'a> {
     encrypted_key: &'a [u8],
 }
 
-struct CreateNearAccountArgs<'a> {
-    account_id: &'a str,
+struct CreateNearAccountArgs {
+    account_id: String,
 }
 
-impl<'a> TryFrom<Value> for CreateNearAccountArgs<'a> {
+impl<'a> TryFrom<Value> for CreateNearAccountArgs {
     type Error = &'static str;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
@@ -35,7 +36,7 @@ impl<'a> TryFrom<Value> for CreateNearAccountArgs<'a> {
             Value::Object(obj) => {
                 if let Some(Value::String(ref account_id)) = obj.get("account_id") {
                     Ok(CreateNearAccountArgs {
-                        account_id: account_id,
+                        account_id: account_id.to_owned(),
                     })
                 } else {
                     Err("invalid JSON-RPC params for CreateNearAccount")
@@ -48,7 +49,6 @@ impl<'a> TryFrom<Value> for CreateNearAccountArgs<'a> {
 
 pub async fn create_near_account(
     rpc: JsonRpc,
-    user_id: Uuid,
     db: Arc<DB>,
     encryption_key: chacha20poly1305_ietf::Key,
 ) -> Result<Response<Body>, UserFacingError> {
@@ -59,7 +59,7 @@ pub async fn create_near_account(
         .map_err(|e| UserFacingError::BadRequest(anyhow!(e)))?;
 
     // check if the requested NEAR accountId exists
-    let view_account_args = ViewAccountArgs::from(args.account_id);
+    let view_account_args = ViewAccountArgs::from(args.account_id.as_str());
     let view_account_res = view_account(view_account_args)
         .await
         .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?;
@@ -70,9 +70,14 @@ pub async fn create_near_account(
 
     // create account
 
-    let tx_bytes = tokio::task::block_in_place(move || {
-        let (pk, mut sk) = ed25519::gen_keypair();
+    let latest_block_hash = get_latest_block_hash()
+        .await
+        .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?;
 
+    let tx_bytes = tokio::task::block_in_place(move || {
+        let (pk, sk) = ed25519::gen_keypair();
+
+        // encrypt keys
         let nonce = chacha20poly1305_ietf::Nonce::from_slice(
             randombytes(chacha20poly1305_ietf::NONCEBYTES).as_ref(),
         )
@@ -86,6 +91,8 @@ pub async fn create_near_account(
             &encryption_key,
         );
 
+        // put keys into database
+
         let record = NearKeyRecord {
             nonce: nonce,
             encrypted_key: enc.as_slice(),
@@ -94,18 +101,23 @@ pub async fn create_near_account(
             UserFacingError::InternalServerError(anyhow!(format!("failed to serialize key: {}", e)))
         })?;
 
-        db.put(args.account_id, record_bytes).map_err(|e| {
-            UserFacingError::InternalServerError(anyhow!(format!(
-                "failed to PUT new key into database: {}",
-                e
-            )))
-        })?;
+        db.put(args.account_id.as_str(), record_bytes)
+            .map_err(|e| {
+                UserFacingError::InternalServerError(anyhow!(format!(
+                    "failed to PUT new key into database: {}",
+                    e
+                )))
+            })?;
+
+        // associate new keys with web2 auth record
+
         Ok(sign_and_serialize_transaction(
             vec![Action::CreateAccount(CreateAccountAction {})],
             &pk,
             &sk,
-            signer_id, // TODO: figure out what this should be
-            args.account_id,
+            &*wallet_account_id, // TODO: figure out what this should be
+            &args.account_id,
+            &latest_block_hash,
         ))
     })?; // FIXME: <- make it easy to see that this is a Result
 
