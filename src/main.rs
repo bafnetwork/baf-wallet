@@ -3,9 +3,11 @@ use futures::future::TryFutureExt;
 use hyper::server::Server;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response};
+use lazy_static::lazy_static;
 use rocksdb::DB;
 use secrecy::{ExposeSecret, Secret, SecretVec};
 use sodiumoxide::crypto::aead::chacha20poly1305_ietf;
+use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
@@ -18,6 +20,11 @@ mod web2;
 
 use error::UserFacingError;
 use util::JsonRpc;
+
+lazy_static! {
+    pub static ref wallet_account_id: String = std::env::var("WALLET_ACCOUNT_ID")
+        .expect("WALLET_ACCOUNT_ID environment variable not set!");
+}
 
 fn get_jwt_secret() -> SecretVec<u8> {
     match std::env::var("JWT_SECRET") {
@@ -66,7 +73,7 @@ async fn handler(
                 // call handler corresponding to requested method
                 match rpc.method.as_str() {
                     "createNearAccount" => {
-                        keystore::create_near_account(rpc, user_id, db, encryption_key).await
+                        keystore::create_near_account(rpc, db, encryption_key).await
                     }
                     "signTx" => keystore::sign_transaction(rpc, user_id, db, encryption_key).await,
                     _ => Err(UserFacingError::NotFound(anyhow!(
@@ -87,20 +94,18 @@ async fn handler(
     }
 }
 
-async fn handler_wrapper(
+async fn handler_unwrapper(
     req: Request<Body>,
     db: Arc<DB>,
     jwt_secret: SecretVec<u8>,
     encryption_key: chacha20poly1305_ietf::Key,
-) -> Response<Body> {
-    handler(req, db, jwt_secret, encryption_key)
+) -> Result<Response<Body>, Infallible> {
+    Ok(handler(req, db, jwt_secret, encryption_key)
         .unwrap_or_else(|err: UserFacingError| err.to_res())
-        .await
+        .await)
 }
 
 async fn main_inner(db: Arc<DB>, addr: SocketAddr) {
-    let addr_ref = &addr;
-
     // A `Service` is needed for every connection, so this "service maker"
     // takes a connection and spits out an async function to handle the request
     let db = Arc::clone(&db);
@@ -113,7 +118,7 @@ async fn main_inner(db: Arc<DB>, addr: SocketAddr) {
                 let db = Arc::clone(&db);
                 let jwt_secret = get_jwt_secret();
                 let encryption_key = get_encryption_key();
-                handler(req, db, jwt_secret, encryption_key)
+                handler_unwrapper(req, db, jwt_secret, encryption_key)
             }))
         }
     });

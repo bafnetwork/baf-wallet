@@ -93,6 +93,7 @@ dependencies = [
  "http",
  "hyper",
  "jsonwebtoken",
+ "lazy_static",
  "log",
  "rocksdb",
  "rust-argon2",

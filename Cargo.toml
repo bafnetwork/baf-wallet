@@ -26,3 +26,4 @@ bytes = { version = "1.0.1" }
 byteorder = { version = "1.4.2" }
 log = { version = "0.4.14" }
 env_logger = { version = "0.8.2" }
+lazy_static = { version = "1.4.0" }
