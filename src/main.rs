@@ -18,11 +18,14 @@ mod near;
 mod util;
 mod web2;
 
+#[cfg(test)]
+mod test_util;
+
 use error::UserFacingError;
 use util::JsonRpc;
 
 lazy_static! {
-    pub static ref wallet_account_id: String = std::env::var("WALLET_ACCOUNT_ID")
+    pub static ref WALLET_ACCOUNT_ID: String = std::env::var("WALLET_ACCOUNT_ID")
         .expect("WALLET_ACCOUNT_ID environment variable not set!");
 }
 
@@ -105,7 +108,8 @@ async fn handler_unwrapper(
         .await)
 }
 
-async fn main_inner(db: Arc<DB>, addr: SocketAddr) {
+pub async fn main_inner(db: Arc<DB>, addr: &SocketAddr) {
+    sodiumoxide::init().expect("failed to initialize libsodium!");
     // A `Service` is needed for every connection, so this "service maker"
     // takes a connection and spits out an async function to handle the request
     let db = Arc::clone(&db);
@@ -124,7 +128,7 @@ async fn main_inner(db: Arc<DB>, addr: SocketAddr) {
     });
 
     // hyper calls the "service maker" for each new connection
-    let server = Server::bind(&addr).serve(service_maker);
+    let server = Server::bind(addr).serve(service_maker);
 
     // Run this server for... forever!
     if let Err(e) = server.await {
@@ -132,30 +136,20 @@ async fn main_inner(db: Arc<DB>, addr: SocketAddr) {
     }
 }
 
-fn wrapped_main(destroy_db_at_end: bool, port: u16, rocksdb_path: &str, rt: Runtime) {
+fn main() {
     env_logger::init();
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     // start rocksdb, get a handle to it, and wrap it in an Arc so multiple threads can use it
 
-    let db = Arc::new(DB::open_default(rocksdb_path).unwrap());
-
-    sodiumoxide::init().expect("failed to initialize libsodium!");
-
-    // start the tokio runtime, start hyper inside it, and then block until the server dies
-    {
-        let db = Arc::clone(&db);
-        rt.block_on(main_inner(db, addr));
-    }
-
-    // DB will automatically be closed when it gets dropped. We can also optionally destroy it (i.e, wipe the data).
-    if destroy_db_at_end {
-        let _ = DB::destroy(&rocksdb::Options::default(), rocksdb_path);
-    }
-}
-
-fn main() {
     let path = std::env::var("ROCKSDB_STORAGE_PATH")
         .expect("ROCKSDB_STORAGE_PATH environment variable not set!");
-    wrapped_main(false, 3000, &path, Runtime::new().unwrap())
+
+    let db = Arc::new(DB::open_default(&path).unwrap());
+
+    let rt = Runtime::new().unwrap();
+
+    rt.block_on(main_inner(Arc::clone(&db), &addr))
+
+    // DB will automatically be closed when it gets dropped
 }

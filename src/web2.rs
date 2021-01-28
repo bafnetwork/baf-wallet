@@ -143,3 +143,43 @@ pub async fn handle_login(
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::req;
+    use crate::test_util::TestServer;
+    use hyper::Client;
+    use serde_json::json;
+    use tokio::time::{sleep, Duration};
+
+    #[tokio::test]
+    async fn test_signup_basic() {
+        let (addr, test_server) = TestServer::new(1);
+        let join_handle = tokio::task::spawn(test_server.start());
+
+        sleep(Duration::from_millis(100)).await;
+
+        let client = Client::new();
+
+        let request = req!(
+            json!({
+                "jsonrpc": "2.0",
+                "method": "signup",
+                "params": {
+                   "email": "someone@gmail.com",
+                   "password": "password",
+                },
+                "id": "dontcare",
+            }),
+            addr
+        );
+
+        let res = client.request(request).await.unwrap();
+
+        // do some checks here
+
+        let test_server = join_handle.await.unwrap();
+
+        // do some more checks here
+    }
+}

@@ -4,7 +4,7 @@ use crate::near::{
     Action, CreateAccountAction, ViewAccountArgs,
 };
 use crate::util::{JsonRpc, JsonRpcResult};
-use crate::wallet_account_id;
+use crate::WALLET_ACCOUNT_ID;
 use anyhow::anyhow;
 use http::StatusCode;
 use hyper::{Body, Response};
@@ -115,7 +115,7 @@ pub async fn create_near_account(
             vec![Action::CreateAccount(CreateAccountAction {})],
             &pk,
             &sk,
-            &*wallet_account_id, // TODO: figure out what this should be
+            &*WALLET_ACCOUNT_ID, // TODO: figure out what this should be
             &args.account_id,
             &latest_block_hash,
         ))
