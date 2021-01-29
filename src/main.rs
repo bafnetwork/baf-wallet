@@ -11,6 +11,7 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
+use tokio::sync::oneshot;
 
 mod error;
 mod keystore;
@@ -29,6 +30,7 @@ lazy_static! {
         .expect("WALLET_ACCOUNT_ID environment variable not set!");
 }
 
+#[cfg(not(test))]
 fn get_jwt_secret() -> SecretVec<u8> {
     match std::env::var("JWT_SECRET") {
         Ok(secret) => Secret::new(secret.into_bytes()),
@@ -36,6 +38,12 @@ fn get_jwt_secret() -> SecretVec<u8> {
     }
 }
 
+#[cfg(test)]
+fn get_jwt_secret() -> SecretVec<u8> {
+    Secret::new("imasecret".to_owned().into_bytes())
+}
+
+#[cfg(not(test))]
 fn get_encryption_key() -> chacha20poly1305_ietf::Key {
     match std::env::var("ENCRYPTION_KEY") {
         Ok(key) => {
@@ -50,6 +58,12 @@ fn get_encryption_key() -> chacha20poly1305_ietf::Key {
     }
 }
 
+#[cfg(test)]
+fn get_encryption_key() -> chacha20poly1305_ietf::Key {
+    let test_key: [u8; chacha20poly1305_ietf::KEYBYTES] = [7; chacha20poly1305_ietf::KEYBYTES];
+    chacha20poly1305_ietf::Key::from_slice(&test_key).unwrap()
+}
+
 /// Handler for all incoming RPC's. matches on the RPC's method and route and executes the
 /// corresponding RPC
 async fn handler(
@@ -62,7 +76,13 @@ async fn handler(
         (&Method::POST, "/rpc") => {
             // check auth headers
             let headers = req.headers();
-            let user_id = tokio::task::block_in_place(|| web2::check_auth(headers, jwt_secret));
+            let auth_header_val = web2::get_auth_header(headers).ok_or(
+                UserFacingError::AuthenticationFailed(anyhow!("unauthenticated request to /rpc")),
+            )?;
+            let user_id =
+                tokio::task::spawn_blocking(move || web2::check_auth(auth_header_val, jwt_secret))
+                    .await
+                    .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?;
             if let Some(user_id) = user_id {
                 // deserialize RPC
                 let body = hyper::body::to_bytes(req.into_body())
@@ -91,9 +111,7 @@ async fn handler(
         }
         (&Method::POST, "/login") => web2::handle_login(req, db, jwt_secret).await,
         (&Method::POST, "/signup") => web2::handle_signup(req, db).await,
-        _ => Ok(Response::new(Body::from(
-            "Try POSTing data to /rpc such as: `curl localhost:3000/rpc -XPOST -d 'hello world'`",
-        ))),
+        _ => Err(UserFacingError::NotFound(anyhow!("route not found"))),
     }
 }
 
@@ -108,7 +126,7 @@ async fn handler_unwrapper(
         .await)
 }
 
-pub async fn main_inner(db: Arc<DB>, addr: &SocketAddr) {
+pub async fn main_inner(db: Arc<DB>, addr: &SocketAddr, stop_chan: Option<oneshot::Receiver<()>>) {
     sodiumoxide::init().expect("failed to initialize libsodium!");
     // A `Service` is needed for every connection, so this "service maker"
     // takes a connection and spits out an async function to handle the request
@@ -118,7 +136,7 @@ pub async fn main_inner(db: Arc<DB>, addr: &SocketAddr) {
 
         async move {
             let db = Arc::clone(&db);
-            Ok::<_, hyper::Error>(service_fn(move |req: Request<Body>| {
+            Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
                 let db = Arc::clone(&db);
                 let jwt_secret = get_jwt_secret();
                 let encryption_key = get_encryption_key();
@@ -130,8 +148,18 @@ pub async fn main_inner(db: Arc<DB>, addr: &SocketAddr) {
     // hyper calls the "service maker" for each new connection
     let server = Server::bind(addr).serve(service_maker);
 
-    // Run this server for... forever!
-    if let Err(e) = server.await {
+    // if stop_chan is Some, shutdown the server when receive "stop" signal over the channel
+    let exit_status = match stop_chan {
+        Some(stop) => {
+            let server = server.with_graceful_shutdown(async {
+                stop.await.ok();
+            });
+            server.await
+        }
+        None => server.await,
+    };
+
+    if let Err(e) = exit_status {
         eprintln!("server error: {}", e);
     }
 }
@@ -149,7 +177,7 @@ fn main() {
 
     let rt = Runtime::new().unwrap();
 
-    rt.block_on(main_inner(Arc::clone(&db), &addr))
+    rt.block_on(main_inner(Arc::clone(&db), &addr, None))
 
     // DB will automatically be closed when it gets dropped
 }

@@ -1,3 +1,4 @@
 /target
 rocksdb
+testdb
 log
