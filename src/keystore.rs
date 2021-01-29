@@ -74,7 +74,7 @@ pub async fn create_near_account(
         .await
         .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?;
 
-    let tx_bytes = tokio::task::block_in_place(move || {
+    let tx_bytes = tokio::task::spawn_blocking(move || {
         let (pk, sk) = ed25519::gen_keypair();
 
         // encrypt keys
@@ -119,7 +119,11 @@ pub async fn create_near_account(
             &args.account_id,
             &latest_block_hash,
         ))
-    })?; // FIXME: <- make it easy to see that this is a Result
+    })
+    .await
+    // ^ returns Result<Result<>>, outer is for joining the blocking task
+    // inner is the result returned by the task
+    .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))??;
 
     match send_transaction_bytes(tx_bytes)
         .await

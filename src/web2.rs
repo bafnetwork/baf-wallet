@@ -5,7 +5,7 @@ use hyper::header::HeaderValue;
 use hyper::{Body, HeaderMap, Request, Response};
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use rocksdb::DB;
-use secrecy::{ExposeSecret, SecretVec};
+use secrecy::{ExposeSecret, SecretString, SecretVec};
 use serde::{Deserialize, Serialize};
 use sodiumoxide::crypto::pwhash::argon2id13;
 use std::sync::Arc;
@@ -20,53 +20,56 @@ struct AuthPayload {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Web2AuthRecord<'a> {
-    password_hash: &'a [u8],
+struct Web2AuthRecord {
+    // let sodiumoxide seroize password hashes
+    password_hash: argon2id13::HashedPassword,
     id: Uuid,
     near_account_id: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SignupArgs<'a> {
-    email: &'a str,
-    password: &'a str,
+#[derive(Deserialize)]
+struct SignupArgs {
+    email: SecretString,
+    password: SecretString,
 }
 
-#[derive(Serialize, Deserialize)]
-struct LoginArgs<'a> {
-    email: &'a str,
-    password: &'a str,
+#[derive(Deserialize)]
+struct LoginArgs {
+    email: SecretString,
+    password: SecretString,
+}
+
+pub fn get_auth_header(headers: &HeaderMap<HeaderValue>) -> Option<HeaderValue> {
+    match headers.get("Authorization") {
+        Some(val) => Some(val.clone()),
+        None => None,
+    }
 }
 
 /// check authorization header and cointained JWT token if it exists and return user's Web2AuthRecord ID
-pub fn check_auth(headers: &HeaderMap<HeaderValue>, jwt_secret: SecretVec<u8>) -> Option<Uuid> {
-    match headers.get("Authorization") {
-        Some(val) => {
-            let val = match val.to_str() {
-                Ok(val) => val,
-                Err(e) => {
-                    eprintln!("invalid non-ASCII header value for `Authorization`: {}", e);
-                    return None;
-                }
-            };
+pub fn check_auth(val: HeaderValue, jwt_secret: SecretVec<u8>) -> Option<Uuid> {
+    let val = match val.to_str() {
+        Ok(val) => val,
+        Err(e) => {
+            eprintln!("invalid non-ASCII header value for `Authorization`: {}", e);
+            return None;
+        }
+    };
 
-            let bearer = "Bearer ";
-            if val.len() < bearer.len() && bearer != &val[0..bearer.len()] {
+    let bearer = "Bearer ";
+    if val.len() < bearer.len() && bearer != &val[0..bearer.len()] {
+        None
+    } else {
+        let token = &val[bearer.len()..];
+        let validation = Validation::default();
+        let decoding_key = DecodingKey::from_secret(jwt_secret.expose_secret().as_ref());
+        match decode::<AuthPayload>(token, &decoding_key, &validation) {
+            Ok(auth) => Some(auth.claims.user_id),
+            Err(e) => {
+                eprintln!("failed to decode JWT: {}", e);
                 None
-            } else {
-                let token = &val[bearer.len()..];
-                let validation = Validation::default();
-                let decoding_key = DecodingKey::from_secret(jwt_secret.expose_secret().as_ref());
-                match decode::<AuthPayload>(token, &decoding_key, &validation) {
-                    Ok(auth) => Some(auth.claims.user_id),
-                    Err(e) => {
-                        eprintln!("failed to decode JWT: {}", e);
-                        None
-                    }
-                }
             }
         }
-        None => None,
     }
 }
 
@@ -77,32 +80,34 @@ pub async fn handle_signup(
     let body = hyper::body::to_bytes(req.into_body())
         .await
         .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?;
-    let args: SignupArgs = serde_json::from_slice(body.as_ref())
-        .map_err(|e| UserFacingError::BadRequest(anyhow!(e)))?;
 
-    tokio::task::block_in_place(move || {
+    tokio::task::spawn_blocking(move || {
+        let args: SignupArgs = serde_json::from_slice(body.as_ref())
+            .map_err(|e| UserFacingError::BadRequest(anyhow!(e)))?;
         let password_hash = argon2id13::pwhash(
-            args.password.as_bytes(),
+            args.password.expose_secret().as_bytes(),
             argon2id13::OPSLIMIT_INTERACTIVE,
             argon2id13::MEMLIMIT_INTERACTIVE,
         )
         .map_err(|_| UserFacingError::InternalServerError(anyhow!("failed to hash password")))?;
 
         let record = Web2AuthRecord {
-            password_hash: password_hash.as_ref(),
+            password_hash: password_hash,
             id: Uuid::new_v4(),
             near_account_id: None,
         };
         let serialized_record = serde_json::to_vec(&record)
             .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?;
 
-        db.put(args.email.as_bytes(), serialized_record.as_slice())
+        db.put(args.email.expose_secret(), serialized_record)
             .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?;
 
         let mut res = Response::new(Body::from("Created"));
         *res.status_mut() = StatusCode::CREATED;
         Ok(res)
     })
+    .await
+    .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?
 }
 
 pub async fn handle_login(
@@ -113,73 +118,84 @@ pub async fn handle_login(
     let body = hyper::body::to_bytes(req.into_body())
         .await
         .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?;
-    let args: LoginArgs = serde_json::from_slice(body.as_ref())
-        .map_err(|e| UserFacingError::BadRequest(anyhow!(e)))?;
 
-    tokio::task::block_in_place(move || {
+    tokio::task::spawn_blocking(move || {
+        let args: LoginArgs = serde_json::from_slice(body.as_ref())
+            .map_err(|e| UserFacingError::BadRequest(anyhow!(e)))?;
         if let Some(record_bytes) = db
-            .get(args.email.as_bytes())
+            .get(args.email.expose_secret())
             .map_err(|e| UserFacingError::AuthenticationFailed(anyhow!(e)))?
         {
             let record: Web2AuthRecord = serde_json::from_slice(record_bytes.as_ref())
                 .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?;
-            if let Some(ref password_hash) =
-                argon2id13::HashedPassword::from_slice(record.password_hash)
-            {
-                if argon2id13::pwhash_verify(password_hash, args.password.as_bytes()) {
-                    // TODO: use jsonwebtoken
-                    // TODO: create a JWT containing record.id, a nonce (will need to import an RNG for this) and probably some other stuff
-                    // TODO: return a response containing the JWT
-                    unimplemented!()
-                } else {
-                    // TODO: return response with 404 not found
-                    unimplemented!()
-                }
+            if argon2id13::pwhash_verify(
+                &record.password_hash,
+                args.password.expose_secret().as_bytes(),
+            ) {
+                // TODO: use jsonwebtoken
+                // TODO: create a JWT containing record.id, a nonce (will need to import an RNG for this) and probably some other stuff
+                // TODO: return a response containing the JWT
+                unimplemented!()
+            } else {
+                // TODO: return response with 404 not found
+                unimplemented!()
             }
-            // TODO: return response with 404 not found
-            unimplemented!()
         } else {
             unimplemented!()
         }
     })
+    .await
+    .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?
 }
 
 #[cfg(test)]
 mod tests {
     use crate::req;
     use crate::test_util::TestServer;
+    use crate::util::JsonRpcResult;
+    use crate::web2::*;
     use hyper::Client;
     use serde_json::json;
-    use tokio::time::{sleep, Duration};
+    use tokio::sync::oneshot;
 
     #[tokio::test]
     async fn test_signup_basic() {
-        let (addr, test_server) = TestServer::new(1);
-        let join_handle = tokio::task::spawn(test_server.start());
+        let (addr, test_server) = TestServer::new();
+        let (stop_tx, join_handle) = test_server.start();
 
-        sleep(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
 
         let client = Client::new();
 
+        // create an account
+
         let request = req!(
             json!({
-                "jsonrpc": "2.0",
-                "method": "signup",
-                "params": {
-                   "email": "someone@gmail.com",
-                   "password": "password",
-                },
-                "id": "dontcare",
+               "email": "someone@gmail.com",
+               "password": "password",
             }),
-            addr
+            addr,
+            "/signup"
         );
 
         let res = client.request(request).await.unwrap();
 
-        // do some checks here
+        assert_eq!(res.status(), StatusCode::CREATED);
 
+        // send could fail in the event the server stops first
+        stop_tx.send(()).ok();
         let test_server = join_handle.await.unwrap();
 
-        // do some more checks here
+        // check db's record
+        let record = test_server.db.get("someone@gmail.com".as_bytes()).unwrap();
+
+        assert!(record.is_some());
+
+        let record = record.unwrap();
+        let record: Web2AuthRecord = serde_json::from_slice(record.as_slice())
+            .expect("db record is not a valid Web2AuthRecord");
+        assert!(record.near_account_id.is_none());
+
+        test_server.destroy();
     }
 }
