@@ -11,7 +11,8 @@ use sodiumoxide::crypto::hash::sha256;
 use sodiumoxide::crypto::sign::ed25519;
 use sodiumoxide::randombytes::randombytes;
 
-#[derive(Serialize, Deserialize)]
+/// args for NEAR's [`viewAccount` JSON-RPC endpoint](https://docs.near.org/docs/api/rpc#view-account)
+#[derive(Serialize)]
 pub struct ViewAccountArgs<'a> {
     request_type: &'a str,
     finality: &'a str,
@@ -52,6 +53,7 @@ impl<'a> From<&'a str> for ViewAccountArgs<'a> {
     }
 }
 
+/// calls NEAR's [`viewAccount` JSON-RPC endpoint](https://docs.near.org/docs/api/rpc#view-account)
 pub async fn view_account<'a>(args: ViewAccountArgs<'a>) -> Result<JsonRpcResult, Error> {
     let view_account_bytes = serde_json::to_vec(&args).map_err(|e| anyhow!(e))?;
 
@@ -74,38 +76,6 @@ pub async fn view_account<'a>(args: ViewAccountArgs<'a>) -> Result<JsonRpcResult
         .map_err(|e| anyhow!(e))?;
     Ok(serde_json::from_slice(res_body.as_ref()).map_err(|e| anyhow!(e))?)
 }
-
-#[derive(Clone, Debug, Serialize, Deserialize, BorshSerialize)]
-pub struct SignedTransaction<'a, 'b> {
-    #[serde(borrow)]
-    transaction: Transaction<'a>,
-    signature: &'b [u8],
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, BorshSerialize)]
-pub struct Transaction<'a> {
-    signer_id: String,
-    #[serde(borrow)]
-    public_key: TxPubKey<'a>,
-    nonce: u64,
-    receiver_id: String,
-    block_hash: String,
-    actions: Vec<Action>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, BorshSerialize)]
-pub struct TxPubKey<'a> {
-    key_type: u8,
-    data: &'a [u8],
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, BorshSerialize)]
-pub enum Action {
-    CreateAccount(CreateAccountAction),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, BorshSerialize)]
-pub struct CreateAccountAction;
 
 /// Sign and serialize transaction
 /// signer_id and receiver_id are near account id's
@@ -250,3 +220,40 @@ pub async fn get_latest_block_hash() -> Result<String, Error> {
         )),
     }
 }
+
+/// NEAR JSON-RPC's [`SignedTransction`](https://github.com/near/near-api-js/blob/ca817850ff2faad426483835c779b32a84f5c979/src/transaction.ts#L144) type
+#[derive(Clone, Debug, Serialize, Deserialize, BorshSerialize)]
+pub struct SignedTransaction<'a, 'b> {
+    #[serde(borrow)]
+    transaction: Transaction<'a>,
+    signature: &'b [u8],
+}
+
+/// NEAR JSON-RPC's [`Transction`](https://github.com/near/near-api-js/blob/ca817850ff2faad426483835c779b32a84f5c979/src/transaction.ts#L148) type
+#[derive(Clone, Debug, Serialize, Deserialize, BorshSerialize)]
+pub struct Transaction<'a> {
+    signer_id: String,
+    #[serde(borrow)]
+    public_key: TxPubKey<'a>,
+    nonce: u64,
+    receiver_id: String,
+    block_hash: String,
+    actions: Vec<Action>,
+}
+
+/// NEAR JSON-RPC's [`PublicKey`](https://github.com/near/near-api-js/blob/ca817850ff2faad426483835c779b32a84f5c979/src/transaction.ts#L144) type
+#[derive(Clone, Debug, Serialize, Deserialize, BorshSerialize)]
+pub struct TxPubKey<'a> {
+    key_type: u8,
+    data: &'a [u8],
+}
+
+/// NEAR JSON-RPC's [`Action`](https://github.com/near/near-api-js/blob/ca817850ff2faad426483835c779b32a84f5c979/src/transaction.ts#L144) type
+#[derive(Clone, Debug, Serialize, Deserialize, BorshSerialize)]
+pub enum Action {
+    CreateAccount(CreateAccountAction),
+    // add more as actions as we need them
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, BorshSerialize)]
+pub struct CreateAccountAction;

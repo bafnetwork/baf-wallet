@@ -64,7 +64,7 @@ fn get_encryption_key() -> chacha20poly1305_ietf::Key {
     chacha20poly1305_ietf::Key::from_slice(&test_key).unwrap()
 }
 
-/// Handler for all incoming RPC's. matches on the RPC's method and route and executes the
+/// Handler for all incoming HTTP Requests. matches on the RPC's method and route and executes the
 /// corresponding RPC
 async fn handler(
     req: Request<Body>,
@@ -126,6 +126,8 @@ async fn handler_unwrapper(
         .await)
 }
 
+/// wrapper function that allows the rocksdb instance, listen addresss, and and optional abort
+/// signal to be injected at runtime. This makes it easier to write tests.
 pub async fn main_inner(db: Arc<DB>, addr: &SocketAddr, stop_chan: Option<oneshot::Receiver<()>>) {
     sodiumoxide::init().expect("failed to initialize libsodium!");
     // A `Service` is needed for every connection, so this "service maker"
