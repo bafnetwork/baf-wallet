@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // HTTP Response helpers
-
 pub fn bad_request() -> Response<Body> {
     let mut res = Response::new(Body::from("Bad Request"));
     *res.status_mut() = StatusCode::BAD_REQUEST;
@@ -29,8 +28,7 @@ pub fn ok() -> Response<Body> {
     res
 }
 
-// Json RPC structs
-
+/// JSON-RPC helper structs for serialization/deserialization
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JsonRpc {
     pub jsonrpc: String,

@@ -11,14 +11,12 @@ use sodiumoxide::crypto::pwhash::argon2id13;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// For web2, rocksdb stores the following:
-/// email -> Web2AuthRecord
-
 #[derive(Serialize, Deserialize, Debug)]
 struct AuthPayload {
     user_id: Uuid,
 }
 
+/// value stored in rocksdb. corresponding key is an email.
 #[derive(Serialize, Deserialize)]
 struct Web2AuthRecord {
     // let sodiumoxide seroize password hashes
@@ -73,6 +71,7 @@ pub fn check_auth(val: HeaderValue, jwt_secret: SecretVec<u8>) -> Option<Uuid> {
     }
 }
 
+/// handler for requests to the `/signup` endpoint
 pub async fn handle_signup(
     req: Request<Body>,
     db: Arc<DB>,
@@ -110,6 +109,7 @@ pub async fn handle_signup(
     .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?
 }
 
+/// handler for requests to the `/login` endpoint
 pub async fn handle_login(
     req: Request<Body>,
     db: Arc<DB>,
@@ -158,6 +158,7 @@ mod tests {
     use serde_json::json;
     use tokio::sync::oneshot;
 
+    /// most basic possible test. More or less a sanity check.
     #[tokio::test]
     async fn test_signup_basic() {
         let (addr, test_server) = TestServer::new();
