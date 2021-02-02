@@ -1,6 +1,6 @@
 [package]
 name = "baf-progressive-wallet"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Sebastien La Duca <sladuca777@gmail.com>"]
 edition = "2018"
 
