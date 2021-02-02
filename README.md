@@ -1,4 +1,4 @@
-# BAF Progressive Wallet
+# BAF Wallet
 
 whitelabel optionally-custodial hosted wallet for the NEAR blockchain as described by [this article](https://medium.com/nearprotocol/on-usability-of-blockchain-applications-398963798ab3)
 
