@@ -1,16 +1,29 @@
 [package]
 name = "baf-progressive-wallet"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Sebastien La Duca <sladuca777@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-hyper = { version = "0.14.1", features = ["full"]}
-http = { version = "0.2.2" }
+hyper = { version = "0.14.2", features = ["full"]}
+http = { version = "0.2.3" }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 rocksdb = { version = "0.15" }
-secrecy = { version = "0.7.0" }
+secrecy = { version = "0.7.0", features = ["serde"]}
+rust-argon2 = { version = "0.8.3" }
+sodiumoxide = { version = "0.2.6" }
+uuid = { version = "0.8.2", features = ["serde", "v4"] }
+jsonwebtoken = { version = "7.2.0" }
+borsh = { version = "0.8.1" }
+thiserror = { version = "1.0.23" }
+anyhow = { version = "1.0.38" }
+futures = { version = "0.3.12" }
+bytes = { version = "1.0.1" }
+byteorder = { version = "1.4.2" }
+log = { version = "0.4.14" }
+env_logger = { version = "0.8.2" }
+lazy_static = { version = "1.4.0" }
