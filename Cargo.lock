@@ -82,9 +82,10 @@ checksum = "cdb031dd78e28731d87d56cc8ffef4a8f36ca26c38fe2de700543e627f8a464a"
 
 [[package]]
 name = "baf-progressive-wallet"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
+ "base58",
  "base64 0.13.0",
  "borsh",
  "byteorder",
@@ -108,6 +109,12 @@ dependencies = [
  "tokio",
  "uuid",
 ]
+
+[[package]]
+name = "base58"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5024ee8015f02155eee35c711107ddd9a9bf3cb689cf2a9089c97e79b6e1ae83"
 
 [[package]]
 name = "base64"
