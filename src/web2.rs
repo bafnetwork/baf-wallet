@@ -1,15 +1,16 @@
-use crate::error::UserFacingError;
+use super::error::UserFacingError;
 use anyhow::anyhow;
 use http::StatusCode;
 use hyper::header::HeaderValue;
 use hyper::{Body, HeaderMap, Request, Response};
-use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use rocksdb::DB;
 use secrecy::{ExposeSecret, SecretString, SecretVec};
 use serde::{Deserialize, Serialize};
 use sodiumoxide::crypto::pwhash::argon2id13;
-use std::{any, sync::Arc};
+use std::sync::Arc;
 use uuid::Uuid;
+use validator::validate_email;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct AuthPayload {
@@ -29,6 +30,32 @@ struct Web2AuthRecord {
 struct SignupArgs {
     email: SecretString,
     password: SecretString,
+}
+
+impl SignupArgs {
+    fn validate(&self) -> Result<(), UserFacingError> {
+        if !self.validate_email() {
+            Err(UserFacingError::InvalidInput(
+                anyhow!("invalid email"),
+                Some("invalid email".to_owned()),
+            ))
+        } else if !self.validate_password() {
+            Err(UserFacingError::InvalidInput(
+                anyhow!("password too short"),
+                Some("invalid email".to_owned()),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_email(&self) -> bool {
+        validate_email(self.email.expose_secret())
+    }
+
+    fn validate_password(&self) -> bool {
+        self.password.expose_secret().len() > 12
+    }
 }
 
 #[derive(Deserialize)]
@@ -83,6 +110,9 @@ pub async fn handle_signup(
     tokio::task::spawn_blocking(move || {
         let args: SignupArgs = serde_json::from_slice(body.as_ref())
             .map_err(|e| UserFacingError::BadRequest(anyhow!(e)))?;
+
+        args.validate()?;
+
         let password_hash = argon2id13::pwhash(
             args.password.expose_secret().as_bytes(),
             argon2id13::OPSLIMIT_INTERACTIVE,
@@ -101,7 +131,7 @@ pub async fn handle_signup(
         db.put(args.email.expose_secret(), serialized_record)
             .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?;
 
-        let mut res = Response::new(Body::from("Created"));
+        let mut res = Response::new(Body::empty());
         *res.status_mut() = StatusCode::CREATED;
         Ok(res)
     })
@@ -171,8 +201,10 @@ mod tests {
     use crate::test_util::TestServer;
     use crate::util::JsonRpcResult;
     use crate::web2::*;
-    use hyper::{client::HttpConnector, Client};
+    use futures::future::{join_all, FutureExt};
+    use hyper::{body, client::HttpConnector, Body, Client};
     use serde_json::json;
+    use serde_json::Value;
     use tokio::sync::oneshot;
 
     async fn signup(
@@ -221,15 +253,27 @@ mod tests {
 
         // create an account
         let client = Client::new();
-        let res = signup(&client, "someemail@email.com", "Abcd123*", addr).await;
+        let res = signup(
+            &client,
+            "someemail@email.com",
+            "k33p_kalm_and_h0dl_0n",
+            addr,
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::CREATED);
         stop_tx.send(()).ok();
+
+        let body = body::to_bytes(res.into_body()).await.unwrap();
+        assert!(body.is_empty());
 
         // send could fail in the event the server stops first
         let test_server = join_handle.await.unwrap();
 
         // check db's record
-        let record = test_server.db.get("someone@gmail.com".as_bytes()).unwrap();
+        let record = test_server
+            .db
+            .get("someemail@email.com".as_bytes())
+            .unwrap();
 
         assert!(record.is_some());
 
@@ -252,7 +296,7 @@ mod tests {
         // create an account
         let client = Client::new();
         let email = "someemail@email.com";
-        let pass = "Abcd123*";
+        let pass = "k33p_kalm_and_h0dl_0n";
         let signup_res = signup(&client, email, pass, addr).await;
         assert_eq!(signup_res.status(), StatusCode::CREATED);
 
@@ -269,7 +313,173 @@ mod tests {
         assert_eq!(res_bad_email.status(), StatusCode::UNAUTHORIZED);
 
         stop_tx.send(()).ok();
+        let test_server = join_handle.await.unwrap();
+        test_server.destroy();
+    }
 
+    #[tokio::test]
+    async fn test_signup_bad_request() {
+        let (addr, test_server) = TestServer::new();
+        let (stop_tx, join_handle) = test_server.start();
+
+        // yield to the server so it can start up
+        tokio::task::yield_now().await;
+
+        let client = Client::new();
+
+        // hit the endpoint with various malformed requests
+        let requests = vec![
+            req!(
+                json!({
+                    "email": "bruh@gmail.com",
+                }),
+                addr,
+                "/signup"
+            ),
+            req!(
+                json!({
+                    "password": "password"
+                }),
+                addr,
+                "/signup"
+            ),
+            req!(
+                json!({
+                    "emaild": "bruh@gmail.com",
+                    "passwordd": "password"
+                }),
+                addr,
+                "/signup"
+            ),
+            req!(json!({}), addr, "/signup"),
+        ];
+
+        let responses = requests.into_iter().map(|request| {
+            client.request(request).then(|res| async {
+                let res = res.unwrap();
+
+                assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+                let body = body::to_bytes(res.into_body()).await.unwrap();
+                assert_eq!(body.len(), 0);
+            })
+        });
+
+        join_all(responses).await;
+
+        stop_tx.send(()).ok();
+        let test_server = join_handle.await.unwrap();
+        test_server.destroy();
+    }
+
+    /// signup should fail for invalid email addresses
+    #[tokio::test]
+    async fn test_signup_invalid_email() {
+        let (addr, test_server) = TestServer::new();
+        let (stop_tx, join_handle) = test_server.start();
+
+        // yield to the server so it can start up
+        tokio::task::yield_now().await;
+
+        let client = Client::new();
+
+        // attempt to create an account with various invalid email addresses
+        let requests = vec![
+            req!(
+                json!({
+                    "email": "bruh",
+                    "password": "password"
+                }),
+                addr,
+                "/signup"
+            ),
+            req!(
+                json!({
+                    "email": "",
+                    "password": "password"
+                }),
+                addr,
+                "/signup"
+            ),
+            req!(
+                json!({
+                    "email": "bruh@",
+                    "password": "password"
+                }),
+                addr,
+                "/signup"
+            ),
+            req!(
+                json!({
+                    "email": "bruh@gmail",
+                    "password": "password"
+                }),
+                addr,
+                "/signup"
+            ),
+            req!(
+                json!({
+                    "email": "@gmail.com",
+                    "password": "password"
+                }),
+                addr,
+                "/signup"
+            ),
+            req!(
+                json!({
+                    "email": "bruh..moment@gmail.com",
+                    "password": "password"
+                }),
+                addr,
+                "/signup"
+            ),
+        ];
+
+        let responses = requests.into_iter().map(|request| {
+            client.request(request).then(|res| async {
+                let res = res.unwrap();
+                assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+                let body = body::to_bytes(res.into_body()).await.unwrap();
+                let response_obj: Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(json!({"error": "invalid email"}), response_obj);
+            })
+        });
+
+        join_all(responses).await;
+
+        stop_tx.send(()).ok();
+        let test_server = join_handle.await.unwrap();
+        test_server.destroy();
+    }
+
+    #[tokio::test]
+    async fn test_signup_password_too_short() {
+        let (addr, test_server) = TestServer::new();
+        let (stop_tx, join_handle) = test_server.start();
+
+        // yield to the server so it can start up
+        tokio::task::yield_now().await;
+
+        let client = Client::new();
+
+        let request = req!(
+            json!({
+                "email": "someone@gmail.com",
+                "password": "password",
+            }),
+            addr,
+            "/signup"
+        );
+
+        let res = client.request(request).await.unwrap();
+        assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        let body = body::to_bytes(res.into_body()).await.unwrap();
+        let response_obj: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json!({"error": "invalid email"}), response_obj);
+
+        stop_tx.send(()).ok();
         let test_server = join_handle.await.unwrap();
         test_server.destroy();
     }

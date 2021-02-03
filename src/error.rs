@@ -1,4 +1,6 @@
-use crate::util::{authentication_failed, bad_request, internal_server_error, not_found, ok};
+use crate::util::{
+    authentication_failed, bad_request, internal_server_error, invalid_input, not_found, ok,
+};
 use hyper::{Body, Response};
 use log::error;
 use thiserror::Error;
@@ -39,6 +41,9 @@ pub enum UserFacingError {
 
     #[error("failed to load wallet account keys")]
     WalletAccountKeyReadFail(anyhow::Error),
+    /// second value is an optional msg to send to the user
+    #[error("invalid input")]
+    InvalidInput(anyhow::Error, Option<String>),
 }
 
 impl UserFacingError {
@@ -64,7 +69,10 @@ impl UserFacingError {
                 error!("{}", err);
                 internal_server_error()
             }
-
+            Self::InvalidInput(err, msg) => {
+                error!("{}", err);
+                invalid_input(msg)
+            }
             Self::BafIdDNE | Self::IdExists | Self::NearAccountDNE | Self::NearAccountExists => {
                 // TODO: add logging for these cases
                 ok()

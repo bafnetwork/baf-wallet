@@ -12,7 +12,19 @@ The BAF Wallet exposes the following HTTP Endpoints, each expecting arguments in
   ```
   * responses:
     * `200`: succeeded in creating new BAF account, empty body
-    * `500`: some kind of error
+    * `422`: invalid email or password is too short. body:
+    ```json
+    {
+      "error": "'invalid email' or 'password too short'"
+    }
+    ```
+    * `409`: account already exists. body:
+    ```json
+    {
+      "error": "accound already exists"
+    }
+    ```
+    * `500`: internal server error
 * `/login`:
   * description: login to an existing "web2" account
   * expected request body:

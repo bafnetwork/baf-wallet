@@ -1,29 +1,39 @@
 use http::StatusCode;
 use hyper::{Body, Response};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 // HTTP Response helpers
 pub fn bad_request() -> Response<Body> {
-    let mut res = Response::new(Body::from("Bad Request"));
+    let mut res = Response::new(Body::empty());
     *res.status_mut() = StatusCode::BAD_REQUEST;
     res
 }
 
 pub fn internal_server_error() -> Response<Body> {
-    let mut res = Response::new(Body::from("Internal Server Error"));
+    let mut res = Response::new(Body::empty());
     *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
     res
 }
 
 pub fn not_found() -> Response<Body> {
-    let mut res = Response::new(Body::from("Not Found"));
+    let mut res = Response::new(Body::empty());
     *res.status_mut() = StatusCode::NOT_FOUND;
     res
 }
 
+pub fn invalid_input(msg: Option<String>) -> Response<Body> {
+    let body = match msg {
+        Some(msg) => Body::from(serde_json::to_string(&json!({ "error": msg })).unwrap()),
+        None => Body::empty(),
+    };
+    let mut res = Response::new(body);
+    *res.status_mut() = StatusCode::UNPROCESSABLE_ENTITY;
+    res
+}
+
 pub fn ok() -> Response<Body> {
-    let mut res = Response::new(Body::from("Ok"));
+    let mut res = Response::new(Body::empty());
     *res.status_mut() = StatusCode::OK;
     res
 }
