@@ -3,4 +3,3 @@ rocksdb
 testdb
 log
 .env
-test-env/*.testnet.json
