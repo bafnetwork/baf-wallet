@@ -1,5 +1,6 @@
 use crate::util::{JsonRpc, JsonRpcResult};
 use anyhow::{anyhow, Error};
+use base58;
 use borsh::BorshSerialize;
 use byteorder::{ByteOrder, LittleEndian};
 use bytes::Bytes;
@@ -10,6 +11,60 @@ use serde_json::{Map, Value};
 use sodiumoxide::crypto::hash::sha256;
 use sodiumoxide::crypto::sign::ed25519;
 use sodiumoxide::randombytes::randombytes;
+use substring::Substring;
+use tokio::fs::File;
+use tokio::io::{self, AsyncReadExt};
+
+use crate::error::UserFacingError;
+
+/// Near wallet credentials
+#[derive(Debug, Serialize, Deserialize)]
+struct WalletCredentials {
+    account_id: String,
+    private_key: String,
+    public_key: String,
+}
+
+/// Get the wallet's public and private key from a credentials file
+async fn get_wallet_keys(
+    cred_path: String,
+) -> Result<(ed25519::PublicKey, ed25519::SecretKey), UserFacingError> {
+    let mut f = File::open(cred_path)
+        .await
+        .map_err(|e| UserFacingError::WalletAccountKeyReadFail(anyhow!(e)))?;
+    let mut buffer = Vec::new();
+
+    // read the whole file
+    f.read_to_end(&mut buffer)
+        .await
+        .map_err(|e| UserFacingError::WalletAccountKeyReadFail(anyhow!(e)))?;
+
+    let wallet_creds: WalletCredentials = serde_json::from_slice(&buffer)
+        .map_err(|e| UserFacingError::WalletAccountKeyReadFail(anyhow!(e)))?;
+
+    let remove_prefix = |key: String| key.substring("ed25519:".len(), key.len()).to_string();
+
+    let pub_trimmed = remove_prefix(wallet_creds.public_key);
+    let secret_trimmed = remove_prefix(wallet_creds.private_key);
+
+    let from_b58 = |v: String| {
+        base58::FromBase58::from_base58(&v[..]).map_err(|_| {
+            UserFacingError::WalletAccountKeyReadFail(anyhow!(
+                "Failed to convert a key from base64!"
+            ))
+        })
+    };
+
+    let pub_vec = from_b58(pub_trimmed)?;
+    let sec_vec = from_b58(secret_trimmed)?;
+    let pub_key = ed25519::PublicKey::from_slice(&(pub_vec)).ok_or(
+        UserFacingError::WalletAccountKeyReadFail(anyhow!("Failed to load the public key!")),
+    )?;
+    let secret_key = ed25519::SecretKey::from_slice(&sec_vec).ok_or(
+        UserFacingError::WalletAccountKeyReadFail(anyhow!("Failed to load the secret key!")),
+    )?;
+    Ok((pub_key, secret_key))
+}
 
 /// args for NEAR's [`viewAccount` JSON-RPC endpoint](https://docs.near.org/docs/api/rpc#view-account)
 #[derive(Serialize)]
@@ -257,3 +312,26 @@ pub enum Action {
 
 #[derive(Clone, Debug, Serialize, Deserialize, BorshSerialize)]
 pub struct CreateAccountAction;
+
+#[cfg(test)]
+mod tests {
+    use super::get_wallet_keys;
+    use sodiumoxide::crypto::sign::ed25519::PublicKey;
+
+    #[tokio::test]
+    async fn test_get_wallet_keys() {
+        let (pub_key, sec_key) =
+            get_wallet_keys("test_assets/test_parse_credentials_0.testnet.json".to_string())
+                .await
+                .unwrap();
+        println!("{:?} \n{:?}", pub_key, sec_key);
+        assert_eq!(
+            pub_key,
+            PublicKey([
+                194, 0, 40, 145, 232, 17, 46, 233, 249, 69, 242, 195, 145, 193, 129, 195, 231, 83,
+                113, 140, 9, 234, 210, 206, 95, 247, 211, 100, 94, 160, 3, 179
+            ])
+        );
+        assert_eq!(sec_key.as_ref().len(), 64);
+    }
+}

@@ -82,12 +82,14 @@ checksum = "cdb031dd78e28731d87d56cc8ffef4a8f36ca26c38fe2de700543e627f8a464a"
 
 [[package]]
 name = "baf-progressive-wallet"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
+ "base58",
  "borsh",
  "byteorder",
  "bytes",
+ "dotenv",
  "env_logger 0.8.2",
  "futures",
  "http",
@@ -101,10 +103,17 @@ dependencies = [
  "serde",
  "serde_json",
  "sodiumoxide",
+ "substring",
  "thiserror",
  "tokio",
  "uuid",
 ]
+
+[[package]]
+name = "base58"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5024ee8015f02155eee35c711107ddd9a9bf3cb689cf2a9089c97e79b6e1ae83"
 
 [[package]]
 name = "base64"
@@ -171,9 +180,9 @@ dependencies = [
 
 [[package]]
 name = "borsh-derive"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "808ecd1275d0599d6cb4d8306a3ca53edbeb359f3845d30a37fee25177847bf5"
+checksum = "b637a47728b78a78cd7f4b85bf06d71ef4221840e059a38f048be2422bf673b2"
 dependencies = [
  "borsh-derive-internal",
  "borsh-schema-derive-internal",
@@ -184,9 +193,9 @@ dependencies = [
 
 [[package]]
 name = "borsh-derive-internal"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40a18462b4fef7f552406490667c4f7c6a904ee4e793e4a51b843ac34ba0e984"
+checksum = "d813fa25eb0bed78c36492cff4415f38c760d6de833d255ba9095bd8ebb7d725"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -195,9 +204,9 @@ dependencies = [
 
 [[package]]
 name = "borsh-schema-derive-internal"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3de92107330c4b204bf02cc224c28ceda5de82a088bbeccc58a00050ceae27d4"
+checksum = "dcf78ee4a98c8cb9eba1bac3d3e2a1ea3d7673c719ce691e67b5cbafc472d3b7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -307,6 +316,12 @@ dependencies = [
  "cfg-if 1.0.0",
  "lazy_static",
 ]
+
+[[package]]
+name = "dotenv"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
 
 [[package]]
 name = "env_logger"
@@ -1118,6 +1133,15 @@ name = "strsim"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ea5119cdb4c55b55d432abb513a0429384878c15dde60cc77b1c99de1a95a6a"
+
+[[package]]
+name = "substring"
+version = "1.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49322b46fbfb78e5869cab1f6177be35f00a821b622c3dafaa7cf5e9556ccfcf"
+dependencies = [
+ "autocfg",
+]
 
 [[package]]
 name = "syn"

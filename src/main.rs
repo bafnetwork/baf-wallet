@@ -1,12 +1,15 @@
 use anyhow::anyhow;
+use dotenv;
 use futures::future::TryFutureExt;
 use hyper::server::Server;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response};
 use lazy_static::lazy_static;
 use rocksdb::DB;
-use secrecy::{ExposeSecret, Secret, SecretVec};
-use sodiumoxide::crypto::aead::chacha20poly1305_ietf;
+use secrecy::{ExposeSecret,Secret, SecretVec};
+use sodiumoxide::crypto::{
+    aead::chacha20poly1305_ietf,
+};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -28,6 +31,11 @@ use util::JsonRpc;
 lazy_static! {
     pub static ref WALLET_ACCOUNT_ID: String = std::env::var("WALLET_ACCOUNT_ID")
         .expect("WALLET_ACCOUNT_ID environment variable not set!");
+}
+
+lazy_static! {
+    pub static ref WALLET_ACCOUNT_KEYS: String = std::env::var("WALLET_ACCOUNT_KEYS")
+        .expect("WALLET_ACCOUNT_KEYS environment variable not set!");
 }
 
 #[cfg(not(test))]
@@ -167,6 +175,7 @@ pub async fn main_inner(db: Arc<DB>, addr: &SocketAddr, stop_chan: Option<onesho
 }
 
 fn main() {
+    dotenv::dotenv().ok();
     env_logger::init();
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
