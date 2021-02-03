@@ -2,3 +2,4 @@
 rocksdb
 testdb
 log
+.env

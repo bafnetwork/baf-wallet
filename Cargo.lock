@@ -85,9 +85,11 @@ name = "baf-progressive-wallet"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.13.0",
  "borsh",
  "byteorder",
  "bytes",
+ "dotenv",
  "env_logger 0.8.2",
  "futures",
  "http",
@@ -101,6 +103,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sodiumoxide",
+ "substring",
  "thiserror",
  "tokio",
  "uuid",
@@ -307,6 +310,12 @@ dependencies = [
  "cfg-if 1.0.0",
  "lazy_static",
 ]
+
+[[package]]
+name = "dotenv"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
 
 [[package]]
 name = "env_logger"
@@ -1118,6 +1127,15 @@ name = "strsim"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ea5119cdb4c55b55d432abb513a0429384878c15dde60cc77b1c99de1a95a6a"
+
+[[package]]
+name = "substring"
+version = "1.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49322b46fbfb78e5869cab1f6177be35f00a821b622c3dafaa7cf5e9556ccfcf"
+dependencies = [
+ "autocfg",
+]
 
 [[package]]
 name = "syn"

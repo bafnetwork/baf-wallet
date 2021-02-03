@@ -36,6 +36,9 @@ pub enum UserFacingError {
 
     #[error("not found")]
     NotFound(anyhow::Error),
+
+    #[error("failed to load wallet account keys")]
+    WalletAccountKeyReadFail(anyhow::Error),
 }
 
 impl UserFacingError {
@@ -57,6 +60,11 @@ impl UserFacingError {
                 error!("{}", err);
                 ok()
             }
+            Self::WalletAccountKeyReadFail(err) => {
+                error!("{}", err);
+                internal_server_error()
+            }
+
             Self::BafIdDNE | Self::IdExists | Self::NearAccountDNE | Self::NearAccountExists => {
                 // TODO: add logging for these cases
                 ok()

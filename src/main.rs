@@ -1,4 +1,7 @@
 use anyhow::anyhow;
+use base64;
+use borsh::{BorshSerialize, BorshDeserialize};
+use dotenv;
 use futures::future::TryFutureExt;
 use hyper::server::Server;
 use hyper::service::{make_service_fn, service_fn};
@@ -6,10 +9,17 @@ use hyper::{Body, Method, Request, Response};
 use lazy_static::lazy_static;
 use rocksdb::DB;
 use secrecy::{ExposeSecret, Secret, SecretVec};
-use sodiumoxide::crypto::aead::chacha20poly1305_ietf;
+use serde::{Deserialize, Serialize};
+use sodiumoxide::crypto::{
+    aead::chacha20poly1305_ietf,
+    sign::ed25519::{keypair_from_seed, PublicKey, SecretKey},
+};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use substring::Substring;
+use tokio::fs::File;
+use tokio::io::{self, AsyncReadExt};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 
@@ -25,9 +35,22 @@ mod test_util;
 use error::UserFacingError;
 use util::JsonRpc;
 
+/// Near wallet credentials
+#[derive(Debug, Serialize, Deserialize)]
+struct WalletCredentials {
+    account_id: String,
+    private_key: String,
+    public_key: String,
+}
+
 lazy_static! {
     pub static ref WALLET_ACCOUNT_ID: String = std::env::var("WALLET_ACCOUNT_ID")
         .expect("WALLET_ACCOUNT_ID environment variable not set!");
+}
+
+lazy_static! {
+    pub static ref WALLET_ACCOUNT_KEYS: String = std::env::var("WALLET_ACCOUNT_KEYS")
+        .expect("WALLET_ACCOUNT_KEYS environment variable not set!");
 }
 
 #[cfg(not(test))]
@@ -62,6 +85,60 @@ fn get_encryption_key() -> chacha20poly1305_ietf::Key {
 fn get_encryption_key() -> chacha20poly1305_ietf::Key {
     let test_key: [u8; chacha20poly1305_ietf::KEYBYTES] = [7; chacha20poly1305_ietf::KEYBYTES];
     chacha20poly1305_ietf::Key::from_slice(&test_key).unwrap()
+}
+
+fn vector_as_array(arr: &mut [u8], vector: Vec<u8>) {
+    for (place, element) in arr.iter_mut().zip(vector.iter()) {
+        *place = *element;
+    }
+}
+
+// #[cfg(not(test))]
+async fn get_wallet_keys() -> Result<(PublicKey, SecretKey), UserFacingError> {
+    let cred_path = (*WALLET_ACCOUNT_KEYS).clone();
+    let mut f = File::open(cred_path)
+        .await
+        .map_err(|e| UserFacingError::WalletAccountKeyReadFail(anyhow!(e)))?;
+    let mut buffer = Vec::new();
+
+    // read the whole file
+    f.read_to_end(&mut buffer)
+        .await
+        .map_err(|e| UserFacingError::WalletAccountKeyReadFail(anyhow!(e)))?;
+
+    let wallet_creds: WalletCredentials = serde_json::from_slice(&buffer)
+        .map_err(|e| UserFacingError::WalletAccountKeyReadFail(anyhow!(e)))?; //WalletCredentials::from_string(buffer.into());
+    println!("{:?}", wallet_creds);
+
+    let remove_prefix = |key: String| key.substring("ed25519:".len(), key.len()).to_string();
+
+    let pub_trimmed = remove_prefix(wallet_creds.public_key);
+    let secret_trimmed = remove_prefix(wallet_creds.private_key);
+
+    println!("{} {}\n{}", pub_trimmed, pub_trimmed.len(), secret_trimmed);
+
+    let into_b64 = |v: String| {
+        sodiumoxide::base64::decode(v, sodiumoxide::base64::Variant::Original).map_err(|_| {
+            UserFacingError::WalletAccountKeyReadFail(anyhow!(
+                "Failed to convert a key from base64!"
+            ))
+        })
+    };
+
+    let mut pub_vec = into_b64(pub_trimmed)?;
+    let mut sec_vec = into_b64(secret_trimmed)?;
+    // let pub_vec = &sodiumoxide::base64::decode(pub_trimmed, sodiumoxide::base64::Variant::Original)
+    //     .map_err(|e| UserFacingError::WalletAccountKeyReadFail(anyhow!(
+    //         "Failed to load the public key. The public key must be in base 64 format!"
+    //     )))?;
+    println!("{} {}", pub_vec.len(), sec_vec.len());
+    let pub_key = PublicKey::from_slice(&(pub_vec)).ok_or(
+        UserFacingError::WalletAccountKeyReadFail(anyhow!("Failed to load the public key!")),
+    )?;
+    let secret_key = SecretKey::from_slice(&sec_vec).ok_or(
+        UserFacingError::WalletAccountKeyReadFail(anyhow!("Failed to load the secret key!")),
+    )?;
+    Ok((pub_key, secret_key))
 }
 
 /// Handler for all incoming HTTP Requests. matches on the RPC's method and route and executes the
@@ -167,6 +244,7 @@ pub async fn main_inner(db: Arc<DB>, addr: &SocketAddr, stop_chan: Option<onesho
 }
 
 fn main() {
+    dotenv::dotenv().ok();
     env_logger::init();
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -182,4 +260,16 @@ fn main() {
     rt.block_on(main_inner(Arc::clone(&db), &addr, None))
 
     // DB will automatically be closed when it gets dropped
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::get_wallet_keys;
+
+    /// test to parse wallet keys
+    #[tokio::test]
+    async fn test_get_wallet_keys() {
+        dotenv::dotenv().ok();
+        let (pub_key, sec_key) = get_wallet_keys().await.unwrap();
+    }
 }
