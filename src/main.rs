@@ -6,7 +6,7 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response};
 use lazy_static::lazy_static;
 use rocksdb::DB;
-use secrecy::{Secret, SecretVec};
+use secrecy::{ExposeSecret,Secret, SecretVec};
 use sodiumoxide::crypto::{
     aead::chacha20poly1305_ietf,
 };
@@ -191,14 +191,4 @@ fn main() {
     rt.block_on(main_inner(Arc::clone(&db), &addr, None))
 
     // DB will automatically be closed when it gets dropped
-}
-
-#[cfg(test)]
-mod tests {
-    /// test to parse wallet keys
-    #[tokio::test]
-    async fn test_get_wallet_keys() {
-        dotenv::dotenv().ok();
-        let (pub_key, sec_key) = get_wallet_keys().await.unwrap();
-    }
 }

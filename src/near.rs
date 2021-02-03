@@ -318,10 +318,20 @@ pub struct CreateAccountAction;
 #[cfg(test)]
 mod tests {
     use super::get_wallet_keys;
+    use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey};
 
     #[tokio::test]
     async fn test_get_wallet_keys() {
-        // TODO: then assert that pub and sec key are correct
-        let (pub_key, sec_key) = get_wallet_keys("test-env/creds.json".to_string()).await.unwrap();
+        let (pub_key, sec_key) = get_wallet_keys("test-env/baf-wallet.testnet.json".to_string())
+            .await
+            .unwrap();
+        assert_eq!(
+            pub_key,
+            PublicKey([
+                167, 220, 246, 228, 140, 246, 159, 72, 177, 251, 215, 94, 128, 85, 186, 104, 26,
+                110, 108, 111, 120, 78, 24, 198, 12, 117, 190, 199, 91, 9, 112, 159
+            ])
+        );
+        assert_eq!(sec_key.as_ref().len(), 64);
     }
 }

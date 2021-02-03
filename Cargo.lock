@@ -86,7 +86,6 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "base58",
- "base64 0.13.0",
  "borsh",
  "byteorder",
  "bytes",
@@ -181,9 +180,9 @@ dependencies = [
 
 [[package]]
 name = "borsh-derive"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "808ecd1275d0599d6cb4d8306a3ca53edbeb359f3845d30a37fee25177847bf5"
+checksum = "b637a47728b78a78cd7f4b85bf06d71ef4221840e059a38f048be2422bf673b2"
 dependencies = [
  "borsh-derive-internal",
  "borsh-schema-derive-internal",
@@ -194,9 +193,9 @@ dependencies = [
 
 [[package]]
 name = "borsh-derive-internal"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40a18462b4fef7f552406490667c4f7c6a904ee4e793e4a51b843ac34ba0e984"
+checksum = "d813fa25eb0bed78c36492cff4415f38c760d6de833d255ba9095bd8ebb7d725"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -205,9 +204,9 @@ dependencies = [
 
 [[package]]
 name = "borsh-schema-derive-internal"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3de92107330c4b204bf02cc224c28ceda5de82a088bbeccc58a00050ceae27d4"
+checksum = "dcf78ee4a98c8cb9eba1bac3d3e2a1ea3d7673c719ce691e67b5cbafc472d3b7"
 dependencies = [
  "proc-macro2",
  "quote",
