@@ -318,7 +318,7 @@ pub struct CreateAccountAction;
 #[cfg(test)]
 mod tests {
     use super::get_wallet_keys;
-    use sodiumoxide::crypto::sign::ed25519::{PublicKey, SecretKey};
+    use sodiumoxide::crypto::sign::ed25519::{PublicKey};
 
     #[tokio::test]
     async fn test_get_wallet_keys() {
