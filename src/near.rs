@@ -15,9 +15,7 @@ use substring::Substring;
 use tokio::fs::File;
 use tokio::io::{self, AsyncReadExt};
 
-#[path = "./error.rs"]
-mod error;
-use error::UserFacingError;
+use crate::error::UserFacingError;
 
 /// Near wallet credentials
 #[derive(Debug, Serialize, Deserialize)]
