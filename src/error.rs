@@ -1,4 +1,4 @@
-use crate::util::{bad_request, internal_server_error, not_found, ok};
+use crate::util::{authentication_failed, bad_request, internal_server_error, not_found, ok};
 use hyper::{Body, Response};
 use log::error;
 use thiserror::Error;
@@ -58,7 +58,7 @@ impl UserFacingError {
             }
             Self::AuthenticationFailed(err) => {
                 error!("{}", err);
-                ok()
+                authentication_failed()
             }
             Self::WalletAccountKeyReadFail(err) => {
                 error!("{}", err);

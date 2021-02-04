@@ -28,6 +28,13 @@ pub fn ok() -> Response<Body> {
     res
 }
 
+pub fn authentication_failed() -> Response<Body> {
+    let mut res = Response::new(Body::from("Unauthorized"));
+    *res.status_mut() = StatusCode::UNAUTHORIZED;
+    res
+
+}
+
 /// JSON-RPC helper structs for serialization/deserialization
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JsonRpc {

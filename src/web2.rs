@@ -3,12 +3,12 @@ use anyhow::anyhow;
 use http::StatusCode;
 use hyper::header::HeaderValue;
 use hyper::{Body, HeaderMap, Request, Response};
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use rocksdb::DB;
 use secrecy::{ExposeSecret, SecretString, SecretVec};
 use serde::{Deserialize, Serialize};
 use sodiumoxide::crypto::pwhash::argon2id13;
-use std::sync::Arc;
+use std::{any, sync::Arc};
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -132,16 +132,30 @@ pub async fn handle_login(
                 &record.password_hash,
                 args.password.expose_secret().as_bytes(),
             ) {
-                // TODO: use jsonwebtoken
-                // TODO: create a JWT containing record.id, a nonce (will need to import an RNG for this) and probably some other stuff
-                // TODO: return a response containing the JWT
-                unimplemented!()
+                let auth_payload = AuthPayload { user_id: record.id };
+                let token = encode(
+                    &Header::default(),
+                    &auth_payload,
+                    &EncodingKey::from_secret(jwt_secret.expose_secret()),
+                )
+                .map_err(|e| {
+                    UserFacingError::InternalServerError(anyhow!(
+                        "Error with validating your password!"
+                    ))
+                })?;
+
+                let mut res = Response::new(Body::from(token));
+                *res.status_mut() = StatusCode::OK;
+                return Ok(res);
             } else {
-                // TODO: return response with 404 not found
-                unimplemented!()
+                return Err(UserFacingError::AuthenticationFailed(anyhow!(
+                    "Password or email are incorrect!"
+                )));
             }
         } else {
-            unimplemented!()
+            return Err(UserFacingError::AuthenticationFailed(anyhow!(
+                "Password or email are incorrect!"
+            )));
         }
     })
     .await
@@ -150,13 +164,51 @@ pub async fn handle_login(
 
 #[cfg(test)]
 mod tests {
+    use std::net::SocketAddr;
+
     use crate::req;
     use crate::test_util::TestServer;
     use crate::util::JsonRpcResult;
     use crate::web2::*;
-    use hyper::Client;
+    use hyper::{client::HttpConnector, Client};
     use serde_json::json;
     use tokio::sync::oneshot;
+
+    async fn signup(
+        client: &Client<HttpConnector>,
+        email: &str,
+        password: &str,
+        addr: SocketAddr,
+    ) -> Response<Body> {
+        let request = req!(
+            json!({
+               "email": email,
+               "password": password,
+            }),
+            addr,
+            "/signup"
+        );
+        let res = client.request(request).await.unwrap();
+        return res;
+    }
+
+    async fn login(
+        client: &Client<HttpConnector>,
+        email: &str,
+        password: &str,
+        addr: SocketAddr,
+    ) -> Response<Body> {
+        let request = req!(
+            json!({
+               "email": email,
+               "password": password,
+            }),
+            addr,
+            "/login"
+        );
+        let res = client.request(request).await.unwrap();
+        return res;
+    }
 
     /// most basic possible test. More or less a sanity check.
     #[tokio::test]
@@ -166,25 +218,13 @@ mod tests {
 
         tokio::task::yield_now().await;
 
-        let client = Client::new();
-
         // create an account
-
-        let request = req!(
-            json!({
-               "email": "someone@gmail.com",
-               "password": "password",
-            }),
-            addr,
-            "/signup"
-        );
-
-        let res = client.request(request).await.unwrap();
-
+        let client = Client::new();
+        let res = signup(&client, "someemail@email.com", "Abcd123*", addr).await;
         assert_eq!(res.status(), StatusCode::CREATED);
+        stop_tx.send(()).ok();
 
         // send could fail in the event the server stops first
-        stop_tx.send(()).ok();
         let test_server = join_handle.await.unwrap();
 
         // check db's record
@@ -197,6 +237,39 @@ mod tests {
             .expect("db record is not a valid Web2AuthRecord");
         assert!(record.near_account_id.is_none());
 
+        test_server.destroy();
+    }
+
+    /// most basic possible test. More or less a sanity check.
+    #[tokio::test]
+    async fn test_login_basic() {
+        let (addr, test_server) = TestServer::new();
+        let (stop_tx, join_handle) = test_server.start();
+
+        tokio::task::yield_now().await;
+
+        // create an account
+        let client = Client::new();
+        let email = "someemail@email.com";
+        let pass = "Abcd123*";
+        let signup_res = signup(&client, email, pass, addr).await;
+        assert_eq!(signup_res.status(), StatusCode::CREATED);
+
+        // test login
+        let res = login(&client, email, pass, addr).await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // test bad password
+        let res_bad_email = login(&client, email, "fake news", addr).await;
+        assert_eq!(res_bad_email.status(), StatusCode::UNAUTHORIZED);
+
+        // test bad email
+        let res_bad_email = login(&client, "fake@fake.co", pass, addr).await;
+        assert_eq!(res_bad_email.status(), StatusCode::UNAUTHORIZED);
+
+        stop_tx.send(()).ok();
+
+        let test_server = join_handle.await.unwrap();
         test_server.destroy();
     }
 }
