@@ -146,11 +146,11 @@ pub async fn handle_login(
 
                 let mut res = Response::new(Body::from(token));
                 *res.status_mut() = StatusCode::OK;
-                return Ok(res);
+                Ok(res)
             } else {
-                return Err(UserFacingError::AuthenticationFailed(anyhow!(
+                Err(UserFacingError::AuthenticationFailed(anyhow!(
                     "Password or email are incorrect!"
-                )));
+                )))
             }
         } else {
             return Err(UserFacingError::AuthenticationFailed(anyhow!(
