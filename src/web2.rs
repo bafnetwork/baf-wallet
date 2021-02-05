@@ -132,6 +132,7 @@ pub async fn handle_login(
                 &record.password_hash,
                 args.password.expose_secret().as_bytes(),
             ) {
+                // TODO: in the future audience and other items may have to be set
                 let auth_payload = AuthPayload { user_id: record.id };
                 let token = encode(
                     &Header::default(),
