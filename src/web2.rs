@@ -154,9 +154,9 @@ pub async fn handle_login(
                 )))
             }
         } else {
-            return Err(UserFacingError::AuthenticationFailed(anyhow!(
+            Err(UserFacingError::AuthenticationFailed(anyhow!(
                 "Password or email are incorrect!"
-            )));
+            )))
         }
     })
     .await
@@ -190,7 +190,7 @@ mod tests {
             "/signup"
         );
         let res = client.request(request).await.unwrap();
-        return res;
+        res
     }
 
     async fn login(
@@ -208,7 +208,7 @@ mod tests {
             "/login"
         );
         let res = client.request(request).await.unwrap();
-        return res;
+        res
     }
 
     /// most basic possible test. More or less a sanity check.
