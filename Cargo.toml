@@ -30,3 +30,4 @@ substring = "1.4.4"
 base58 = "0.1.0"
 borsh = "0.8.1"
 dotenv = "0.15.0"
+validator = { version = "0.12.0" }

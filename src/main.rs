@@ -6,10 +6,8 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response};
 use lazy_static::lazy_static;
 use rocksdb::DB;
-use secrecy::{ExposeSecret,Secret, SecretVec};
-use sodiumoxide::crypto::{
-    aead::chacha20poly1305_ietf,
-};
+use secrecy::{ExposeSecret, Secret, SecretVec};
+use sodiumoxide::crypto::aead::chacha20poly1305_ietf;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
