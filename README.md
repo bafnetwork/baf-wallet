@@ -19,23 +19,21 @@ Our roadmap takes the form of something we call a "Minimum Awesome Product map",
 
 - Bronze 🥉
     - [ ] signup
-	- [x] implement
-        - [ ] verify emails using twilio or something like that
     - [ ] login
         - [x] implement
-        - [ ] set JWT headers properly
-    - [ ] verifyEmail
+        - [ ] [set JWT headers properly](https://github.com/bafnetwork/baf-wallet/issues/18)
+    - [ ] [verifyEmail](https://github.com/bafnetwork/baf-wallet/issues/17)
     - [ ] create near accounts
 	- [ ] implement near account creation via wallet's root account
         - [x] add owner's NEAR account via environment variables
-        - [ ] add endpoint that allows owner to authorize user to create their account exactly once
-        - [ ] add endpoint that allows user to create their account once authorized
+        - [ ] [add endpoint that allows owner to authorize user to create their account exactly once](https://github.com/bafnetwork/baf-wallet/issues/7)
+        - [ ] [add endpoint that allows user to create their account once authorized](https://github.com/bafnetwork/baf-wallet/issues/23)
     - [ ] signTx for transactions that don't contain data
         - [ ] figure out what needs to happen for this and add this functionality to a `signTx` RPC method
-    - [ ] use access keys proprely
+    - [ ] [use access keys proprely](https://github.com/bafnetwork/baf-wallet/issues/19)
         - [ ] create new ones for contract methods that haven't been used yet
         - [ ] use the access key with minimum permissions for a particular contract methods when signing transactions
-    - [ ] signTx for arbitrary transaction as byte string
+    - [ ] [signTx for arbitrary transaction as byte string](https://github.com/bafnetwork/baf-wallet/issues/2)
     - [ ] implement another wallet account in near-api-js
 	- https://github.com/near/near-api-js/blob/master/src/wallet-account.ts generates a new keypair literally every time the user signs in 
 	- this doesn't fit with our JWT-oriented flow, so we'll want to implement a `HostedWalletConnection` that overrides the undesired behavior of `WalletConnection` and try to get it pushed upstream into `near-api-js`
@@ -44,8 +42,8 @@ Our roadmap takes the form of something we call a "Minimum Awesome Product map",
     - [ ] testing
         - [x] write basic integration tests for every HTTP endpoint
 	- [ ] write basic integration tests for every `/rpc` method
-	- [ ] implement a harness for unit-testing HTTP handlers in `test_util.rs`
-	- [ ] implement a harness for unit-testing `/rpc` handlers in `test_util.rs`
+	- [ ] [implement a harness for unit-testing HTTP handlers in `test_util.rs`](https://github.com/bafnetwork/baf-wallet/issues/20)
+	- [ ] [implement a harness for unit-testing `/rpc` handlers in `test_util.rs`](https://github.com/bafnetwork/baf-wallet/issues/21)
 	- [ ] write correctness unit tests for all handlers, both `/rpc` and HTTP
 	- [ ] make sure that `/rpc` actually adheres to `JSON-RPC` spec
 - Silver 🥈
