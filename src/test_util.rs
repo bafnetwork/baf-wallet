@@ -1,12 +1,16 @@
-use crate::main_inner;
+use crate::{main_inner, near::{SignedTransaction}};
 use lazy_static::lazy_static;
 use rocksdb::DB;
+use serde_json::json;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+use wiremock::{MockServer, Mock, ResponseTemplate, Match, Request};
+use wiremock::matchers::{method, path};
+use sodiumoxide::crypto::sign::ed25519;
 
 lazy_static! {
     static ref COUNTER: AtomicU16 = AtomicU16::new(0);
@@ -43,6 +47,47 @@ impl TestServer {
 
         (stop_tx, join_handle)
     }
+}
+
+struct NearRpcMatcher {}
+impl Match for NearRpcMatcher {
+    fn matches(&self, request: &Request) -> bool {
+        // TODO: check headers
+        let signed_tx: SignedTransaction = match serde_json::from_slice(request.body.as_slice()) {
+            Ok(tx) => tx,
+            Err(e) => {
+                eprintln!("NearRpcMatcher: failed to deserialize transaction: {}", e);
+                return false
+            }
+        };
+
+        let signer_pk = match ed25519::PublicKey::from_slice(signed_tx.transaction.public_key.data) {
+            Some(key) => key,
+            None => return false
+        };
+        
+        match ed25519::verify(signed_tx.signature, &signer_pk) {
+            Ok(_) => {},
+            Err(()) => {
+                eprintln!("NearRpcMatcher: signature verification failed");
+                return false
+            }
+        }
+
+        true 
+    }
+}
+
+fn near_response_ok() -> ResponseTemplate {
+    // TODO: headers
+    // TODO: emulate a real response - might depend on action, in which case we'd take an enum as a param
+    ResponseTemplate::new(200).set_body_json(json!({}))
+}
+
+pub async fn mock_near() -> MockServer {
+    let server = MockServer::start().await;
+    // TODO: use matchers
+    server
 }
 
 #[macro_export]

@@ -109,13 +109,13 @@ impl<'a> From<&'a str> for ViewAccountArgs<'a> {
 }
 
 /// calls NEAR's [`viewAccount` JSON-RPC endpoint](https://docs.near.org/docs/api/rpc#view-account)
-pub async fn view_account<'a>(args: ViewAccountArgs<'a>) -> Result<JsonRpcResult, Error> {
+pub async fn view_account<'a>(args: ViewAccountArgs<'a>, near_url: &str) -> Result<JsonRpcResult, Error> {
     let view_account_bytes = serde_json::to_vec(&args).map_err(|e| anyhow!(e))?;
 
     // TODO: put uri into env variable
     let req = Request::builder()
         .method(Method::POST)
-        .uri("https://rpc.testnet.near.org")
+        .uri(near_url)
         .header("content-type", "application/json")
         .body(Body::from(view_account_bytes))
         .map_err(|e| anyhow!(e))?;
@@ -175,11 +175,11 @@ pub fn sign_and_serialize_transaction(
         .into()
 }
 
-pub async fn send_transaction_bytes(tx_bytes: Bytes) -> Result<JsonRpcResult, Error> {
+pub async fn send_transaction_bytes(tx_bytes: Bytes, near_url: &str) -> Result<JsonRpcResult, Error> {
     // send RPC
     let req = Request::builder()
         .method(Method::POST)
-        .uri("https://rpc.testnet.near.org")
+        .uri(near_url)
         .header("content-type", "application/json")
         .body(Body::from(tx_bytes))
         .map_err(|e| anyhow!(e))?;
@@ -235,13 +235,13 @@ impl<'a> Into<JsonRpc> for BlockArgs<'a> {
     }
 }
 
-pub async fn get_latest_block_hash() -> Result<String, Error> {
+pub async fn get_latest_block_hash(near_url: &str) -> Result<String, Error> {
     let rpc: JsonRpc = BlockArgs::Finality("final").into();
     let rpc_bytes = serde_json::to_vec(&rpc).map_err(|e| anyhow!(e))?;
 
     let req = Request::builder()
         .method(Method::POST)
-        .uri("https:://rpc.testnet.near.org")
+        .uri(near_url)
         .header("content-type", "application/json")
         .body(Body::from(rpc_bytes))
         .map_err(|e| anyhow!(e))?;
@@ -280,27 +280,27 @@ pub async fn get_latest_block_hash() -> Result<String, Error> {
 #[derive(Clone, Debug, Serialize, Deserialize, BorshSerialize)]
 pub struct SignedTransaction<'a, 'b> {
     #[serde(borrow)]
-    transaction: Transaction<'a>,
-    signature: &'b [u8],
+    pub transaction: Transaction<'a>,
+    pub signature: &'b [u8],
 }
 
 /// NEAR JSON-RPC's [`Transction`](https://github.com/near/near-api-js/blob/ca817850ff2faad426483835c779b32a84f5c979/src/transaction.ts#L148) type
 #[derive(Clone, Debug, Serialize, Deserialize, BorshSerialize)]
 pub struct Transaction<'a> {
-    signer_id: String,
+    pub signer_id: String,
     #[serde(borrow)]
-    public_key: TxPubKey<'a>,
-    nonce: u64,
-    receiver_id: String,
-    block_hash: String,
-    actions: Vec<Action>,
+    pub public_key: TxPubKey<'a>,
+    pub nonce: u64,
+    pub receiver_id: String,
+    pub block_hash: String,
+    pub actions: Vec<Action>,
 }
 
 /// NEAR JSON-RPC's [`PublicKey`](https://github.com/near/near-api-js/blob/ca817850ff2faad426483835c779b32a84f5c979/src/transaction.ts#L144) type
 #[derive(Clone, Debug, Serialize, Deserialize, BorshSerialize)]
 pub struct TxPubKey<'a> {
-    key_type: u8,
-    data: &'a [u8],
+    pub key_type: u8,
+    pub data: &'a [u8],
 }
 
 /// NEAR JSON-RPC's [`Action`](https://github.com/near/near-api-js/blob/ca817850ff2faad426483835c779b32a84f5c979/src/transaction.ts#L144) type

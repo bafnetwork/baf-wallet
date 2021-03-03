@@ -29,11 +29,19 @@ use util::JsonRpc;
 lazy_static! {
     pub static ref WALLET_ACCOUNT_ID: String = std::env::var("WALLET_ACCOUNT_ID")
         .expect("WALLET_ACCOUNT_ID environment variable not set!");
-}
 
-lazy_static! {
     pub static ref WALLET_ACCOUNT_KEYS: String = std::env::var("WALLET_ACCOUNT_KEYS")
-        .expect("WALLET_ACCOUNT_KEYS environment variable not set!");
+    .expect("WALLET_ACCOUNT_KEYS environment variable not set!");
+    
+    pub static ref NEAR_URL: String = match std::env::var("NETWORK") {
+        Err(_) => "https:://rpc.testnet.near.org".to_owned(),
+        Ok(network) => match network.as_str() {
+            "testnet" => "https:://rpc.testnet.near.org".to_owned(),
+            "mainnet" => "https:://rpc.mainnet.near.org".to_owned(),
+            "devnet" => "https:://rpc.devnet.near.org".to_owned(),
+            custom_url => custom_url.to_owned()
+        }
+    };
 }
 
 #[cfg(not(test))]
@@ -43,6 +51,8 @@ fn get_jwt_secret() -> SecretVec<u8> {
         Err(_) => panic!("JWT_SECRET environment variable not set!"),
     }
 }
+
+
 
 #[cfg(test)]
 fn get_jwt_secret() -> SecretVec<u8> {
@@ -77,6 +87,7 @@ async fn handler(
     db: Arc<DB>,
     jwt_secret: SecretVec<u8>,
     encryption_key: chacha20poly1305_ietf::Key,
+    near_url: &str
 ) -> Result<Response<Body>, UserFacingError> {
     match (req.method(), req.uri().path()) {
         (&Method::POST, "/rpc") => {
@@ -102,7 +113,7 @@ async fn handler(
                 // call handler corresponding to requested method
                 match rpc.method.as_str() {
                     "createNearAccount" => {
-                        keystore::create_near_account(rpc, db, encryption_key).await
+                        keystore::create_near_account(rpc, db, encryption_key, near_url).await
                     }
                     "signTx" => keystore::sign_transaction(rpc, user_id, db, encryption_key).await,
                     _ => Err(UserFacingError::NotFound(anyhow!(
@@ -126,8 +137,9 @@ async fn handler_unwrapper(
     db: Arc<DB>,
     jwt_secret: SecretVec<u8>,
     encryption_key: chacha20poly1305_ietf::Key,
+    near_url: &str
 ) -> Result<Response<Body>, Infallible> {
-    Ok(handler(req, db, jwt_secret, encryption_key)
+    Ok(handler(req, db, jwt_secret, encryption_key, near_url)
         .unwrap_or_else(|err: UserFacingError| err.to_res())
         .await)
 }
@@ -148,7 +160,7 @@ pub async fn main_inner(db: Arc<DB>, addr: &SocketAddr, stop_chan: Option<onesho
                 let db = Arc::clone(&db);
                 let jwt_secret = get_jwt_secret();
                 let encryption_key = get_encryption_key();
-                handler_unwrapper(req, db, jwt_secret, encryption_key)
+                handler_unwrapper(req, db, jwt_secret, encryption_key, &NEAR_URL)
             }))
         }
     });

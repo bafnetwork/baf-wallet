@@ -51,6 +51,7 @@ pub async fn create_near_account(
     rpc: JsonRpc,
     db: Arc<DB>,
     encryption_key: chacha20poly1305_ietf::Key,
+    near_url: &str,
 ) -> Result<Response<Body>, UserFacingError> {
     let params = rpc.params.ok_or(UserFacingError::BadRequest(anyhow!(
         "rpc to create_near_account has no params!"
@@ -60,7 +61,7 @@ pub async fn create_near_account(
 
     // check if the requested NEAR accountId exists
     let view_account_args = ViewAccountArgs::from(args.account_id.as_str());
-    let view_account_res = view_account(view_account_args)
+    let view_account_res = view_account(view_account_args, near_url)
         .await
         .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?;
     if let JsonRpcResult::Err(_e) = view_account_res {
@@ -70,7 +71,7 @@ pub async fn create_near_account(
 
     // create account
 
-    let latest_block_hash = get_latest_block_hash()
+    let latest_block_hash = get_latest_block_hash(near_url)
         .await
         .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?;
 
@@ -125,7 +126,7 @@ pub async fn create_near_account(
     // inner is the result returned by the task
     .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))??;
 
-    match send_transaction_bytes(tx_bytes)
+    match send_transaction_bytes(tx_bytes, near_url)
         .await
         .map_err(|e| UserFacingError::InternalServerError(anyhow!(e)))?
     {
