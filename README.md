@@ -31,7 +31,6 @@ At a high level, the BAF Wallet is a REST API with an `/rpc/` endpoint that expo
     - [ ]  CLI: sign into Kratos
     - [ ]  CLI: build + request signature for simple “send money” transactions
     - [ ]  CLI: send signed transaction to NEAR blockchain
-    - Slack
 - Phase 1
     - [ ]  Wallet JSON-RPC Spec
     - [ ]  Implement Wallet JSON-RPC
