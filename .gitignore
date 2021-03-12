@@ -1,5 +1,5 @@
-/target
-rocksdb
+wallet/target
+wallet/rocksdb
 testdb
 log
 .env
